@@ -10,12 +10,14 @@ if len(sys.argv) < 2:
     sys.exit(1)
 
 url = sys.argv[1]
-maxres = 1080
+maxres = 720
 if "--maxres" in sys.argv:
     i = sys.argv.index("--maxres")
-    if i+1 < len(sys.argv):
-        try: maxres = int(sys.argv[i+1])
-        except: pass
+    try:
+        maxres = int(sys.argv[i + 1])
+    except (IndexError, ValueError):
+        # lasse maxres auf Default
+        pass
 
 # Format-Strategie:
 # 1) bestvideo (mp4, <=maxres) + m4a; 2) sonst best mp4; 3) sonst best
