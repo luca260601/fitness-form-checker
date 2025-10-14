@@ -14,3 +14,10 @@ build/
 
 # OS
 .DS_Store
+
+# große Binärdateien
+*.mp4
+*.mkv
+*.webm
+assets/sample_clips/*
+!assets/sample_clips/.gitkeep
