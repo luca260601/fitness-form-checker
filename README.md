@@ -10,7 +10,6 @@ Später kommt der OpenAI Assistant (File Search + Functions) hinzu.
 python -m venv .venv
 source .venv/bin/activate  # Windows: .venv\Scripts\activate
 pip install -r requirements-dev.txt
-pip insatll -r requirements.txt
 
 
 
@@ -26,16 +25,16 @@ python cli\client_multi.py --video "assets\sample_clips\Kniebeugen_Seitenansicht
 ```
 .
 ├── app/
-│   ├── _init_.py
+│   ├── __init_.py
 │   └── pose_service/
 │       ├── main_generic.py
 │       └── engine 
 │           ├── registry.py
 │           ├── types.py
 │           ├── utils.py
-│           ├── _init_.py
-│           └── exercise
-│                └── squad.py
+│           ├── __init_.py
+│           └── exercises
+│                └── squat.py
 ├── cli/
 │   └── client_multi.py
 ├── tests/
@@ -46,7 +45,7 @@ python cli\client_multi.py --video "assets\sample_clips\Kniebeugen_Seitenansicht
 │   └── report_outline.md
 ├── assets/
 │   └── sample_clips/
-│       └── Kniebeugen.mp4 (Platzhalter)
+│       └── Kniebeugen_Seitenansicht_trim.mp4
 ├── .github/
 │   ├── workflows/ci.yml
 │   └── ISSUE_TEMPLATE/
