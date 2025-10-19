@@ -1,0 +1,26 @@
+name: Squat
+aliases: [Kniebeuge, Back Squat, Front Squat]
+targets: [knee, hip]
+
+segments:
+  - [shoulder, hip]
+  - [hip, knee]
+  - [knee, ankle]
+
+angles:
+  - id: knee
+    label: Knie
+    points: [hip, knee, ankle]
+  - id: hip
+    label: Hüfte
+    points: [shoulder, hip, knee]
+  - id: back_tilt
+    label: Back tilt
+    points: [hip_down, hip, shoulder]
+
+overlays:
+  arrows_at: [knee, hip]
+
+moments:
+  knee: "total_N * 0.05 * sin_deg(180 - angles.knee)"
+  hip:  "total_N * 0.06 * sin_deg(180 - angles.hip)"
