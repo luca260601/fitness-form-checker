@@ -17,6 +17,9 @@ from utils.estimation import estimate_angles_from_text, estimate_angles_from_pdf
 
 from pose_service.engine import get_pose_vector, compute_angles_config, estimate_moments_config
 from pose_service.overlay import draw_vector_body_config, draw_force_overlay
+from pose_service.enhanced_engine import get_enhanced_pose_vector, compute_enhanced_angles_config, estimate_enhanced_moments_config
+from pose_service.enhanced_overlay import draw_enhanced_vector_body, draw_enhanced_force_overlay
+from pose_service.combined_visualization import create_combined_analysis_image
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 load_dotenv()
@@ -86,13 +89,24 @@ def cmd_analyze():
     external_load = parse_kg(Prompt.ask("Externe Last [kg] (z. B. Stange + Scheiben)", default="0"))
     analysis = AnalysisInput(exercise=exercise, image_path=image_path, external_load_kg=external_load)
 
+<<<<<<< HEAD
     # YAML MUSS existieren
+=======
+    session_dir = make_session_dir(os.path.join(BASE_DIR, "output"), slugify(profile.name), slugify(exercise))
+    print(f"[dim]Session:[/dim] {session_dir}")
+
+    print("\n[cyan]→ Lese Pose aus Bild (Enhanced)...[/cyan]")
+    pose = get_enhanced_pose_vector(analysis.image_path)
+
+    # YAML-Konfiguration MUSS existieren
+>>>>>>> 535de7d (bessere output analyse der engine)
     cfg = find_config(BASE_DIR, exercise)
     if not cfg:
         print(f"[red]Keine Übungs-Config gefunden für '{exercise}'.[/red]")
         print("Bitte zuerst registrieren mit:\n  python app.py register-exercise-pdf --name \"<Übung>\" --pdf \"/Pfad/datei.pdf\"")
         return
 
+<<<<<<< HEAD
     # Session-Ordner
     session_dir = make_session_dir(os.path.join(BASE_DIR, "output"), slugify(profile.name), slugify(exercise))
     print(f"[dim]Session:[/dim] {session_dir}")
@@ -119,6 +133,17 @@ def cmd_analyze():
 
     # Momente (immer berechnen)
     moments = estimate_moments_config(cfg, angles, profile.body_mass_kg, analysis.external_load_kg)
+=======
+    # Show pose quality metrics
+    quality = pose.get("quality_metrics", {})
+    if quality.get("is_high_quality", False):
+        print(f"[green]✓ Pose-Qualität: Hoch (Score: {quality.get('pose_quality_score', 0):.2f})[/green]")
+    else:
+        print(f"[yellow]⚠ Pose-Qualität: Mittel (Score: {quality.get('pose_quality_score', 0):.2f})[/yellow]")
+    
+    angles = compute_enhanced_angles_config(pose, cfg, use_3d=False)
+    moments = estimate_enhanced_moments_config(cfg, angles, profile.body_mass_kg, analysis.external_load_kg, profile.height_cm)
+>>>>>>> 535de7d (bessere output analyse der engine)
 
     # Tabelle
     t = Table(title="Winkel & Momente (vereinfacht)", box=box.SIMPLE_HEAVY)
@@ -130,6 +155,7 @@ def cmd_analyze():
         t.add_row(k, f"{v} N·m")
     print(t)
 
+<<<<<<< HEAD
     # Zeichnen NUR wenn echte Pose vorhanden ist
     if pose:
         print("[cyan]→ Vektorfigur & Overlays...[/cyan]")
@@ -144,6 +170,50 @@ def cmd_analyze():
                 print(f"[yellow]Overlay {joint} übersprungen: {e}[/yellow]")
     else:
         print("[yellow]Kein Bild → keine Pose-Grafik. (Werte & Feedback wurden dennoch erstellt.)[/yellow]")
+=======
+    print("[cyan]→ Erstelle kombinierte Analyse-Visualisierung...[/cyan]")
+    
+    # Create single combined analysis image
+    try:
+        profile_dict = {
+            'name': profile.name,
+            'body_mass_kg': profile.body_mass_kg,
+            'height_cm': profile.height_cm,
+            'experience_level': profile.experience_level
+        }
+        
+        combined_path = create_combined_analysis_image(
+            analysis.image_path, pose, cfg, angles, moments, profile_dict, session_dir
+        )
+        print(f"[green]✓ Kombinierte Analyse erstellt:[/green] {combined_path}")
+        
+    except Exception as e:
+        print(f"[yellow]Kombinierte Visualisierung fehlgeschlagen, verwende separate Bilder: {e}[/yellow]")
+        
+        # Fallback to separate images
+        try:
+            enhanced_vfiles = draw_enhanced_vector_body(cfg, pose, angles, moments, session_dir)
+            print(f"[green]✓ Enhanced vector svg:[/green] {enhanced_vfiles['svg']}")
+            print(f"[green]✓ Enhanced vector png:[/green] {enhanced_vfiles['png']}")
+        except Exception as e2:
+            print(f"[yellow]Enhanced visualization failed, using standard: {e2}[/yellow]")
+            vfiles = draw_vector_body_config(cfg, pose, angles, moments, session_dir)
+            print(f"[green]vector svg:[/green] {vfiles['svg']}")
+            print(f"[green]vector png:[/green] {vfiles['png']}")
+
+        # Generate enhanced overlays as fallback
+        for joint in cfg.get("overlays", {}).get("arrows_at", []):
+            try:
+                enhanced_path = draw_enhanced_force_overlay(analysis.image_path, pose, moments, joint, session_dir)
+                print(f"[green]✓ Enhanced overlay {joint}:[/green] {enhanced_path}")
+            except Exception as e3:
+                print(f"[yellow]Enhanced overlay {joint} failed, trying standard: {e3}[/yellow]")
+                try:
+                    pth = draw_force_overlay(analysis.image_path, pose, moments, joint, session_dir)
+                    print(f"[green]overlay {joint}:[/green] {pth}")
+                except Exception as e4:
+                    print(f"[red]Overlay {joint} komplett übersprungen: {e4}[/red]")
+>>>>>>> 535de7d (bessere output analyse der engine)
 
     # Feedback + Persistenz
     print("[cyan]→ Generiere KI-Feedback...[/cyan]")
