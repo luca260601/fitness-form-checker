@@ -15,10 +15,7 @@ from utils.config_gen import generate_config_from_pdf
 from utils.exercises import find_config, load_all_configs
 from utils.estimation import estimate_angles_from_text, estimate_angles_from_pdf
 
-from pose_service.engine import get_pose_vector, compute_angles_config, estimate_moments_config
-from pose_service.overlay import draw_vector_body_config, draw_force_overlay
-from pose_service.enhanced_engine import get_enhanced_pose_vector, compute_enhanced_angles_config, estimate_enhanced_moments_config
-from pose_service.enhanced_overlay import draw_enhanced_vector_body, draw_enhanced_force_overlay
+from pose_service.engine import get_pose_vector, compute_angles_config
 from pose_service.combined_visualization import create_combined_analysis_image
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -30,30 +27,59 @@ class UserProfile(BaseModel):
     name: str
     body_mass_kg: float = Field(..., ge=20, le=300)
     height_cm: float = Field(..., ge=120, le=230)
-    experience_level: str = "Anfänger"
 
 class AnalysisInput(BaseModel):
     exercise: str
     image_path: str
     external_load_kg: float = 0.0
 
+# ------------------ Simple Moments Calculation ------------------
+def _calculate_simple_moments(angles: Dict[str, float], body_mass_kg: float, external_load_kg: float) -> Dict[str, float]:
+    """Calculate simple, realistic joint moments for visualization."""
+    import math
+    
+    moments = {}
+    total_weight_N = (body_mass_kg + external_load_kg) * 9.81
+    
+    # Knee moment (based on knee angle)
+    knee_angle = angles.get('knee_deg', 90)
+    if knee_angle < 180:  # Only when knee is bent
+        knee_moment = total_weight_N * 0.25 * math.sin(math.radians(180 - knee_angle))
+        moments['knee_moment_Nm'] = max(0, knee_moment)
+    
+    # Hip moment (based on hip angle and trunk lean)
+    hip_angle = angles.get('hip_deg', 90)
+    trunk_angle = angles.get('trunk_deg', 0)
+    if hip_angle < 180:  # Only when hip is flexed
+        hip_moment = total_weight_N * 0.3 * math.sin(math.radians(180 - hip_angle))
+        # Add trunk contribution
+        if trunk_angle > 0:
+            hip_moment += total_weight_N * 0.2 * math.sin(math.radians(trunk_angle))
+        moments['hip_moment_Nm'] = max(0, hip_moment)
+    
+    # Ankle moment (for balance)
+    ankle_angle = angles.get('ankle_deg', 90)
+    if abs(ankle_angle - 90) > 5:  # Only if ankle is not neutral
+        ankle_moment = total_weight_N * 0.1 * abs(math.sin(math.radians(ankle_angle - 90)))
+        moments['ankle_moment_Nm'] = max(0, ankle_moment)
+    
+    return moments
+
 # ------------------ AI feedback ------------------
 def ai_feedback(profile: UserProfile, analysis: AnalysisInput,
-                angles: Dict[str, float], moments: Dict[str, float],
-                knowledge_text: str) -> str:
+                angles: Dict[str, float], moments: Dict[str, float], knowledge_text: str) -> str:
     system_prompt = read_system_prompt(BASE_DIR)
     user_content = f"""
 [PROFIL]
 Name: {profile.name}
 Gewicht: {profile.body_mass_kg} kg
 Größe: {profile.height_cm} cm
-Level: {profile.experience_level}
 
 [ANALYSE]
 Übung: {analysis.exercise}
 Zusatzlast: {analysis.external_load_kg} kg
 Winkel (Grad): {json.dumps(angles, ensure_ascii=False)}
-Momente (N·m, vereinfacht): {json.dumps(moments, ensure_ascii=False)}
+Momente (N·m): {json.dumps(moments, ensure_ascii=False)}
 
 [WISSEN]
 {knowledge_text}
@@ -80,8 +106,7 @@ def cmd_analyze():
     name = Prompt.ask("Dein Name", default="Alex")
     body_mass = float(Prompt.ask("Körpergewicht [kg]", default="70"))
     height_cm = float(Prompt.ask("Größe [cm]", default="175"))
-    level = Prompt.ask("Trainingserfahrung", choices=["Anfänger","Fortgeschritten","Pro"], default="Anfänger")
-    profile = UserProfile(name=name, body_mass_kg=body_mass, height_cm=height_cm, experience_level=level)
+    profile = UserProfile(name=name, body_mass_kg=body_mass, height_cm=height_cm)
 
     print("\n[bold]Analyse[/bold]")
     exercise = Prompt.ask("Übung (z. B. Squat, Bizepscurls, Overhead Press)", default="Squat")
@@ -89,24 +114,14 @@ def cmd_analyze():
     external_load = parse_kg(Prompt.ask("Externe Last [kg] (z. B. Stange + Scheiben)", default="0"))
     analysis = AnalysisInput(exercise=exercise, image_path=image_path, external_load_kg=external_load)
 
-<<<<<<< HEAD
-    # YAML MUSS existieren
-=======
-    session_dir = make_session_dir(os.path.join(BASE_DIR, "output"), slugify(profile.name), slugify(exercise))
-    print(f"[dim]Session:[/dim] {session_dir}")
-
-    print("\n[cyan]→ Lese Pose aus Bild (Enhanced)...[/cyan]")
-    pose = get_enhanced_pose_vector(analysis.image_path)
 
     # YAML-Konfiguration MUSS existieren
->>>>>>> 535de7d (bessere output analyse der engine)
     cfg = find_config(BASE_DIR, exercise)
     if not cfg:
         print(f"[red]Keine Übungs-Config gefunden für '{exercise}'.[/red]")
         print("Bitte zuerst registrieren mit:\n  python app.py register-exercise-pdf --name \"<Übung>\" --pdf \"/Pfad/datei.pdf\"")
         return
 
-<<<<<<< HEAD
     # Session-Ordner
     session_dir = make_session_dir(os.path.join(BASE_DIR, "output"), slugify(profile.name), slugify(exercise))
     print(f"[dim]Session:[/dim] {session_dir}")
@@ -118,8 +133,16 @@ def cmd_analyze():
             print(f"[red]Bild nicht gefunden:[/red] {image_path}")
             return
         print("\n[cyan]→ Lese Pose aus Bild...[/cyan]")
-        pose = get_pose_vector(image_path)
-        angles = compute_angles_config(pose, cfg)
+        pose = get_pose_vector(image_path, enhanced=True)
+        
+        # Show pose quality metrics
+        quality = pose.get("quality_metrics", {})
+        if quality.get("is_high_quality", False):
+            print(f"[green]✓ Pose-Qualität: Hoch (Score: {quality.get('pose_quality_score', 0):.2f})[/green]")
+        else:
+            print(f"[yellow]⚠ Pose-Qualität: Mittel (Score: {quality.get('pose_quality_score', 0):.2f})[/yellow]")
+        
+        angles = compute_angles_config(pose, cfg, use_3d=False)
     else:
         # aus PDF (falls registriert) oder aus kurzer Beschreibung schätzen
         src_pdf = (cfg.get("meta") or {}).get("source_pdf_path")
@@ -131,94 +154,37 @@ def cmd_analyze():
             desc = Prompt.ask("Kurzbeschreibung der Pose (z. B. Ellbogen stark gebeugt, Oberarm senkrecht, ...)")
             angles = estimate_angles_from_text(cfg, desc)
 
-    # Momente (immer berechnen)
-    moments = estimate_moments_config(cfg, angles, profile.body_mass_kg, analysis.external_load_kg)
-=======
-    # Show pose quality metrics
-    quality = pose.get("quality_metrics", {})
-    if quality.get("is_high_quality", False):
-        print(f"[green]✓ Pose-Qualität: Hoch (Score: {quality.get('pose_quality_score', 0):.2f})[/green]")
-    else:
-        print(f"[yellow]⚠ Pose-Qualität: Mittel (Score: {quality.get('pose_quality_score', 0):.2f})[/yellow]")
+    # No moments calculation - show "No moment data available" for cleaner look
+    moments = {}
     
-    angles = compute_enhanced_angles_config(pose, cfg, use_3d=False)
-    moments = estimate_enhanced_moments_config(cfg, angles, profile.body_mass_kg, analysis.external_load_kg, profile.height_cm)
->>>>>>> 535de7d (bessere output analyse der engine)
-
-    # Tabelle
-    t = Table(title="Winkel & Momente (vereinfacht)", box=box.SIMPLE_HEAVY)
-    t.add_column("Größe"); t.add_column("Wert")
+    # Tabelle (nur Winkel - sauber und professionell)
+    t = Table(title="Joint Angles Analysis", box=box.SIMPLE_HEAVY)
+    t.add_column("Joint"); t.add_column("Angle")
     for k, v in angles.items():
         if k.endswith("_deg"):
-            t.add_row(k.replace("_deg",""), f"{v}°")
-    for k, v in moments.items():
-        t.add_row(k, f"{v} N·m")
+            joint_name = k.replace("_deg","").replace("_", " ").title()
+            t.add_row(joint_name, f"{v:.1f}°")
     print(t)
 
-<<<<<<< HEAD
-    # Zeichnen NUR wenn echte Pose vorhanden ist
-    if pose:
-        print("[cyan]→ Vektorfigur & Overlays...[/cyan]")
-        vfiles = draw_vector_body_config(cfg, pose, angles, moments, session_dir)
-        print(f"[green]vector svg:[/green] {vfiles['svg']}")
-        print(f"[green]vector png:[/green] {vfiles['png']}")
-        for joint in cfg.get("overlays", {}).get("arrows_at", []):
-            try:
-                pth = draw_force_overlay(analysis.image_path, pose, moments, joint, session_dir)
-                print(f"[green]overlay {joint}:[/green] {pth}")
-            except Exception as e:
-                print(f"[yellow]Overlay {joint} übersprungen: {e}[/yellow]")
-    else:
-        print("[yellow]Kein Bild → keine Pose-Grafik. (Werte & Feedback wurden dennoch erstellt.)[/yellow]")
-=======
-    print("[cyan]→ Erstelle kombinierte Analyse-Visualisierung...[/cyan]")
-    
-    # Create single combined analysis image
-    try:
-        profile_dict = {
-            'name': profile.name,
-            'body_mass_kg': profile.body_mass_kg,
-            'height_cm': profile.height_cm,
-            'experience_level': profile.experience_level
-        }
-        
-        combined_path = create_combined_analysis_image(
-            analysis.image_path, pose, cfg, angles, moments, profile_dict, session_dir
-        )
-        print(f"[green]✓ Kombinierte Analyse erstellt:[/green] {combined_path}")
-        
-    except Exception as e:
-        print(f"[yellow]Kombinierte Visualisierung fehlgeschlagen, verwende separate Bilder: {e}[/yellow]")
-        
-        # Fallback to separate images
-        try:
-            enhanced_vfiles = draw_enhanced_vector_body(cfg, pose, angles, moments, session_dir)
-            print(f"[green]✓ Enhanced vector svg:[/green] {enhanced_vfiles['svg']}")
-            print(f"[green]✓ Enhanced vector png:[/green] {enhanced_vfiles['png']}")
-        except Exception as e2:
-            print(f"[yellow]Enhanced visualization failed, using standard: {e2}[/yellow]")
-            vfiles = draw_vector_body_config(cfg, pose, angles, moments, session_dir)
-            print(f"[green]vector svg:[/green] {vfiles['svg']}")
-            print(f"[green]vector png:[/green] {vfiles['png']}")
-
-        # Generate enhanced overlays as fallback
-        for joint in cfg.get("overlays", {}).get("arrows_at", []):
-            try:
-                enhanced_path = draw_enhanced_force_overlay(analysis.image_path, pose, moments, joint, session_dir)
-                print(f"[green]✓ Enhanced overlay {joint}:[/green] {enhanced_path}")
-            except Exception as e3:
-                print(f"[yellow]Enhanced overlay {joint} failed, trying standard: {e3}[/yellow]")
-                try:
-                    pth = draw_force_overlay(analysis.image_path, pose, moments, joint, session_dir)
-                    print(f"[green]overlay {joint}:[/green] {pth}")
-                except Exception as e4:
-                    print(f"[red]Overlay {joint} komplett übersprungen: {e4}[/red]")
->>>>>>> 535de7d (bessere output analyse der engine)
-
-    # Feedback + Persistenz
+    # Feedback + Persistenz - ERST generieren für die Visualisierung
     print("[cyan]→ Generiere KI-Feedback...[/cyan]")
     knowledge_text = read_knowledge(exercise, BASE_DIR)
     feedback = ai_feedback(profile, analysis, angles, moments, knowledge_text)
+    
+    print("[cyan]→ Erstelle professionelle Analyse-Visualisierung...[/cyan]")
+    
+    # Create professional combined analysis image
+    profile_dict = {
+        'name': profile.name,
+        'body_mass_kg': profile.body_mass_kg,
+        'height_cm': profile.height_cm
+    }
+    
+    combined_path = create_combined_analysis_image(
+        analysis.image_path, pose, cfg, angles, moments, profile_dict, session_dir, feedback
+    )
+    print(f"[green]✓ Professionelle Analyse erstellt:[/green] {combined_path}")
+    print(f"[dim]Alle Visualisierungen in einem hochwertigen Bild kombiniert[/dim]")
     save_text(session_dir, "feedback.txt", feedback)
     save_json(session_dir, "angles.json", angles)
     save_json(session_dir, "moments.json", moments)
