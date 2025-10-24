@@ -1,0 +1,21 @@
+angles:
+- id: armwinkel_links
+  points:
+  - left_shoulder
+  - left_elbow
+  - left_wrist
+- id: armwinkel_rechts
+  points:
+  - right_shoulder
+  - right_elbow
+  - right_wrist
+- id: rueckenwinkel
+  points:
+  - vertical
+  - left_hip
+  - left_shoulder
+- id: hueftwinkel
+  points:
+  - left_knee
+  - left_hip
+  - left_shoulder

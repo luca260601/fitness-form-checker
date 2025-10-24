@@ -1,371 +1,231 @@
-"""
-Unified pose analysis engine - combines basic and enhanced functionality.
-"""
-
+# pose_service/engine.py
+from __future__ import annotations
 import math
 import numpy as np
 import cv2
-from typing import Dict, Any, List, Tuple, Optional
-
-# Try to import scipy for enhanced features, fallback if not available
-try:
-    from scipy.spatial.distance import euclidean
-    from scipy import signal
-    SCIPY_AVAILABLE = True
-except ImportError:
-    SCIPY_AVAILABLE = False
+from typing import Dict, Any, List, Optional
 
 # --- MediaPipe Setup ---
 def _load_mediapipe():
-    """Load MediaPipe with proper error handling."""
     try:
         import mediapipe as mp
         return mp
     except Exception as e:
-        raise RuntimeError("MediaPipe ist nicht installiert/kompatibel (nutze Python 3.11).") from e
+        raise RuntimeError("MediaPipe ist nicht installiert/kompatibel (Python 3.11).") from e
 
-# --- Landmarks Indices (MediaPipe) ---
+# Landmarks-Index (MediaPipe BlazePose full)
 LMS = {
-    "LEFT_HIP": 23, "RIGHT_HIP": 24,
-    "LEFT_KNEE": 25, "RIGHT_KNEE": 26,
-    "LEFT_ANKLE": 27, "RIGHT_ANKLE": 28,
     "LEFT_SHOULDER": 11, "RIGHT_SHOULDER": 12,
-    "LEFT_ELBOW": 13, "RIGHT_ELBOW": 14,
-    "LEFT_WRIST": 15, "RIGHT_WRIST": 16,
-    "NOSE": 0, "LEFT_EYE": 1, "RIGHT_EYE": 2,
-    "LEFT_EAR": 7, "RIGHT_EAR": 8,
-    "LEFT_HEEL": 29, "RIGHT_HEEL": 30,
-    "LEFT_FOOT_INDEX": 31, "RIGHT_FOOT_INDEX": 32
+    "LEFT_ELBOW": 13,    "RIGHT_ELBOW": 14,
+    "LEFT_WRIST": 15,    "RIGHT_WRIST": 16,
+    "LEFT_HIP": 23,      "RIGHT_HIP": 24,
+    "LEFT_KNEE": 25,     "RIGHT_KNEE": 26,
+    "LEFT_ANKLE": 27,    "RIGHT_ANKLE": 28,
+    "LEFT_HEEL": 29,     "RIGHT_HEEL": 30,
+    "LEFT_FOOT_INDEX": 31, "RIGHT_FOOT_INDEX": 32,
 }
 
-# --- Enhanced Pose Detection ---
-def get_pose_vector(image_path: str, confidence_threshold: float = 0.5, enhanced: bool = True) -> Dict[str, Any]:
-    """
-    Unified pose detection function with optional enhanced features.
-    
-    Args:
-        image_path: Path to the image file
-        confidence_threshold: Minimum confidence for landmarks
-        enhanced: Whether to use enhanced features (quality metrics, etc.)
-    
-    Returns:
-        Dictionary containing pose data and optional quality metrics
-    """
+def get_pose_vector(image_path: str,
+                    confidence_threshold: float = 0.5,
+                    enhanced: bool = True,
+                    **_kwargs) -> Dict[str, Any]:
+    """Liest ein Bild, schÃ¤tzt Pose, gibt dict mit 'image_size' und 'landmarks'."""
     mp = _load_mediapipe()
     mp_pose = mp.solutions.pose
-    
-    image = cv2.imread(image_path)
-    if image is None:
+
+    img = cv2.imread(image_path)
+    if img is None:
         raise FileNotFoundError(f"Could not load image: {image_path}")
-    
-    h, w = image.shape[:2]
-    image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-    
-    # Use higher model complexity for enhanced mode
-    model_complexity = 2 if enhanced else 1
-    min_detection_confidence = 0.7 if enhanced else 0.5
-    
+
+    h, w = img.shape[:2]
+    rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+
     with mp_pose.Pose(
-        static_image_mode=True, 
-        model_complexity=model_complexity,
+        static_image_mode=True,
+        model_complexity=(2 if enhanced else 1),
         enable_segmentation=False,
-        min_detection_confidence=min_detection_confidence
+        min_detection_confidence=(0.7 if enhanced else 0.5)
     ) as pose:
-        results = pose.process(image_rgb)
-    
-    if not results.pose_landmarks:
+        res = pose.process(rgb)
+
+    if not res.pose_landmarks:
         raise RuntimeError("Keine Pose erkannt.")
-    
-    # Extract landmarks
-    landmarks = []
-    for lm in results.pose_landmarks.landmark:
-        landmarks.append({
-            "x": lm.x, 
-            "y": lm.y, 
-            "z": lm.z, 
-            "visibility": lm.visibility
-        })
-    
-    pose_data = {
-        "image_size": {"width": w, "height": h}, 
-        "landmarks": landmarks
+
+    lms = []
+    for lm in res.pose_landmarks.landmark:
+        lms.append({"x": lm.x, "y": lm.y, "z": lm.z, "visibility": lm.visibility})
+
+    out = {"image_size": {"width": w, "height": h}, "landmarks": lms}
+    # einfache QualitÃ¤tsmetrik
+    vis = [lm["visibility"] for lm in lms]
+    out["quality_metrics"] = {
+        "average_visibility": float(np.mean(vis)),
+        "minimum_visibility": float(np.min(vis)),
+        "pose_quality_score": float(sum(v >= confidence_threshold for v in vis) / len(vis)),
+        "is_high_quality": bool(sum(v >= confidence_threshold for v in vis) / len(vis) >= 0.7),
+        "high_confidence_count": int(sum(v >= confidence_threshold for v in vis)),
+        "total_landmarks": len(vis),
     }
-    
-    # Add enhanced quality metrics if requested
-    if enhanced and SCIPY_AVAILABLE:
-        quality_metrics = _calculate_pose_quality(landmarks, confidence_threshold)
-        pose_data["quality_metrics"] = quality_metrics
-    
-    return pose_data
+    return out
 
-def _calculate_pose_quality(landmarks: List[Dict], confidence_threshold: float) -> Dict[str, Any]:
-    """Calculate pose quality metrics."""
-    visibilities = [lm["visibility"] for lm in landmarks]
+# ---- Hilfen (exportiert, weil Visualization sie importiert) ----
+def _detect_exercise_type(landmarks: List[Dict]) -> str:
+    """
+    Erkennt Übungstyp basierend auf Beinstellung:
+    - 'bilateral': Beide Füße parallel (Squat, Overhead Press)
+    - 'unilateral': Ein Bein vorne, eins hinten (Lunges, Split Squat)
     
-    # Filter high-confidence landmarks
-    high_conf_landmarks = [v for v in visibilities if v >= confidence_threshold]
-    
-    # Calculate metrics
-    average_visibility = np.mean(visibilities)
-    minimum_visibility = np.min(visibilities)
-    pose_quality_score = len(high_conf_landmarks) / len(landmarks)
-    
-    # Determine if pose is high quality
-    is_high_quality = (
-        pose_quality_score >= 0.7 and 
-        average_visibility >= 0.6 and 
-        minimum_visibility >= 0.3
-    )
-    
-    return {
-        "average_visibility": float(average_visibility),
-        "minimum_visibility": float(minimum_visibility),
-        "pose_quality_score": float(pose_quality_score),
-        "is_high_quality": bool(is_high_quality),
-        "high_confidence_count": len(high_conf_landmarks),
-        "total_landmarks": len(landmarks)
-    }
-
-def _choose_optimal_side(landmarks: List[Dict], joint_names: List[str]) -> str:
-    """Choose the side with better visibility for analysis."""
-    left_visibility = 0
-    right_visibility = 0
-    count = 0
-    
-    for joint in joint_names:
-        try:
-            left_idx = LMS.get(f"LEFT_{joint.upper()}")
-            right_idx = LMS.get(f"RIGHT_{joint.upper()}")
-            
-            if left_idx is not None and right_idx is not None:
-                left_visibility += landmarks[left_idx]["visibility"]
-                right_visibility += landmarks[right_idx]["visibility"]
-                count += 1
-        except (IndexError, KeyError):
-            continue
-    
-    if count == 0:
-        return "LEFT"  # Default fallback
-    
-    avg_left = left_visibility / count
-    avg_right = right_visibility / count
-    
-    return "LEFT" if avg_left >= avg_right else "RIGHT"
-
-# --- Coordinate Extraction ---
-def _get_xy(pose: Dict[str, Any], side: str, joint: str) -> np.ndarray:
-    """Get 2D coordinates for a joint."""
+    Returns: 'bilateral' oder 'unilateral'
+    """
     try:
-        idx = LMS[f"{side}_{joint.upper()}"]
-        lm = pose["landmarks"][idx]
-        return np.array([lm["x"], lm["y"]])
-    except (KeyError, IndexError):
-        raise ValueError(f"Joint {side}_{joint} not found or invalid")
+        l_ankle = landmarks[LMS["LEFT_ANKLE"]]
+        r_ankle = landmarks[LMS["RIGHT_ANKLE"]]
+        
+        # X-Position Differenz (normalisiert 0-1)
+        x_diff = abs(l_ankle["x"] - r_ankle["x"])
+        
+        # Y-Position Differenz (normalisiert 0-1)  
+        y_diff = abs(l_ankle["y"] - r_ankle["y"])
+        
+        # Bei Lunges: deutlicher X-Unterschied (>0.15) UND ähnliche Y-Höhe
+        # Bei Squats: Füße nebeneinander, minimaler X-Unterschied
+        if x_diff > 0.15 and y_diff < 0.1:
+            return "unilateral"  # Lunges, Split Squat
+        else:
+            return "bilateral"   # Squat, Deadlift, Press
+            
+    except Exception:
+        return "bilateral"  # Fallback
+
+def _choose_optimal_side(landmarks: List[Dict], joints: List[str]) -> str:
+    """
+    Wählt beste Körperseite für bilaterale Übungen (Squat, Press).
+    Basiert auf durchschnittlicher Landmark-Sichtbarkeit.
+    
+    Für unilaterale Übungen (Lunges) sollte stattdessen front/rear genutzt werden!
+    """
+    left = right = cnt = 0.0
+    for j in joints:
+        li = LMS.get(f"LEFT_{j.upper()}"); ri = LMS.get(f"RIGHT_{j.upper()}")
+        if li is None or ri is None: continue
+        try:
+            left += float(landmarks[li]["visibility"])
+            right += float(landmarks[ri]["visibility"])
+            cnt += 1.0
+        except Exception:
+            pass
+    if cnt == 0:
+        return "LEFT"
+    return "LEFT" if (left/cnt) >= (right/cnt) else "RIGHT"
 
 def _get_enhanced_xy(pose: Dict[str, Any], side: str, joint: str) -> np.ndarray:
-    """Enhanced coordinate extraction with special joint handling."""
-    # Handle special virtual joints
-    if joint == "hip_center":
-        left_hip = _get_xy(pose, "LEFT", "hip")
-        right_hip = _get_xy(pose, "RIGHT", "hip")
-        return (left_hip + right_hip) / 2
-    elif joint == "shoulder_center":
-        left_shoulder = _get_xy(pose, "LEFT", "shoulder")
-        right_shoulder = _get_xy(pose, "RIGHT", "shoulder")
-        return (left_shoulder + right_shoulder) / 2
-    elif joint == "hip_down":
-        # Virtual point below hip for back tilt calculation
-        hip = _get_xy(pose, side, "hip")
-        return hip + np.array([0, 0.1])  # 10% down from hip
-    else:
-        return _get_xy(pose, side, joint)
+    """joint âˆˆ {shoulder,hip,knee,ankle,elbow,wrist, ...}"""
+    idx = LMS.get(f"{side}_{joint.upper()}")
+    if idx is None:
+        raise ValueError(f"Joint {side}_{joint} unbekannt")
+    lm = pose["landmarks"][idx]
+    return np.array([float(lm["x"]), float(lm["y"])])
 
-# --- Angle Calculations ---
-def compute_angles_config(pose: Dict[str, Any], cfg: Dict[str, Any], use_3d: bool = False) -> Dict[str, float]:
+def _which_front_side(landmarks: List[Dict]) -> str:
+    try:
+        lx = float(landmarks[LMS["LEFT_ANKLE"]]["x"])
+        rx = float(landmarks[LMS["RIGHT_ANKLE"]]["x"])
+        return "LEFT" if lx > rx else "RIGHT"
+    except Exception:
+        return "LEFT"
+
+def _resolve_xy_any(pose: Dict[str, Any], default_side: str, token: str) -> Optional[np.ndarray]:
+    t = token.lower()
+    if t == "vertical":
+        return None
+    if t.startswith("left_"):
+        return _get_enhanced_xy(pose, "LEFT", t[5:])
+    if t.startswith("right_"):
+        return _get_enhanced_xy(pose, "RIGHT", t[6:])
+    if t.startswith("front_") or t.startswith("rear_"):
+        front = _which_front_side(pose["landmarks"])
+        rear = "RIGHT" if front == "LEFT" else "LEFT"
+        side = front if t.startswith("front_") else rear
+        joint = t.split("_", 1)[1]
+        return _get_enhanced_xy(pose, side, joint)
+    return _get_enhanced_xy(pose, default_side, t)
+
+def _angle_2d(p1: np.ndarray, p2: np.ndarray, p3: np.ndarray) -> float:
+    v1 = p1 - p2; v2 = p3 - p2
+    n1 = np.linalg.norm(v1); n2 = np.linalg.norm(v2)
+    if n1 == 0 or n2 == 0: return 0.0
+    c = np.clip(np.dot(v1/n1, v2/n2), -1.0, 1.0)
+    return float(np.degrees(np.arccos(c)))
+
+def compute_angles_config(pose: Dict[str, Any], cfg: Dict[str, Any], use_3d: bool=False) -> Dict[str, float]:
     """
-    Compute angles based on configuration with optional enhanced features.
+    Berechnet alle in cfg['angles'] definierten Winkel.
+    
+    WICHTIG: Erkennt automatisch Übungstyp:
+    - Bilateral (Squat): Nutzt beste Körperseite (left/right)
+    - Unilateral (Lunges): Nutzt front/rear basierend auf X-Position
+    
+    Returns: Dict mit Keys "<angle_id>_deg" und "__side__" / "__exercise_type__"
     """
-    if not pose:
-        return {}
+    if not pose or "angles" not in cfg: return {}
     
-    # Choose optimal side
-    joint_names = ["shoulder", "hip", "knee", "ankle"]
-    side = _choose_optimal_side(pose["landmarks"], joint_names)
+    # 1) Übungstyp erkennen
+    exercise_type = _detect_exercise_type(pose["landmarks"])
     
-    angles = {"__side__": side}
+    # 2) Seite wählen (nur für bilaterale Übungen relevant)
+    if exercise_type == "bilateral":
+        side = _choose_optimal_side(pose["landmarks"], ["shoulder","hip","knee","ankle"])
+    else:
+        # Bei unilateralen Übungen: Wir brauchen front/rear, nicht left/right
+        # Aber für Schulter/Oberkörper nutzen wir trotzdem die beste Seite
+        side = _choose_optimal_side(pose["landmarks"], ["shoulder","hip"])
     
-    for angle_config in cfg.get("angles", []):
-        angle_id = angle_config["id"]
-        points = angle_config["points"]
-        
-        if len(points) != 3:
-            continue
-            
+    out = {
+        "__side__": side,
+        "__exercise_type__": exercise_type
+    }
+    
+    # 3) Alle Winkel berechnen
+    for a in cfg.get("angles", []):
         try:
-            # Get coordinates
-            if use_3d and SCIPY_AVAILABLE:
-                p1 = _get_enhanced_xyz(pose, side, points[0])
-                p2 = _get_enhanced_xyz(pose, side, points[1])
-                p3 = _get_enhanced_xyz(pose, side, points[2])
-                angle_deg = _compute_3d_angle(p1, p2, p3)
+            aid = a["id"]; pts = a["points"]
+            if not isinstance(pts, list) or len(pts)!=3: continue
+            
+            if pts[0] == "vertical":
+                # Vertikalwinkel: z.B. Rumpfneigung
+                b = _resolve_xy_any(pose, side, pts[1])
+                c = _resolve_xy_any(pose, side, pts[2])
+                if b is None or c is None: raise ValueError("vertical: null")
+                v = c - b; u = np.array([0.0, -1.0])
+                nu = np.linalg.norm(u); nv = np.linalg.norm(v)
+                if nu==0 or nv==0: ang = 0.0
+                else:
+                    cosang = np.clip(np.dot(u,v)/(nu*nv), -1.0, 1.0)
+                    ang = float(np.degrees(np.arccos(cosang)))
+                out[f"{aid}_deg"] = ang
             else:
-                p1 = _get_enhanced_xy(pose, side, points[0])
-                p2 = _get_enhanced_xy(pose, side, points[1])
-                p3 = _get_enhanced_xy(pose, side, points[2])
-                angle_deg = _compute_2d_angle(p1, p2, p3)
-            
-            angles[f"{angle_id}_deg"] = float(angle_deg)
-            
+                # Standard 3-Punkt-Winkel
+                p1 = _resolve_xy_any(pose, side, pts[0])
+                p2 = _resolve_xy_any(pose, side, pts[1])
+                p3 = _resolve_xy_any(pose, side, pts[2])
+                ang = _angle_2d(p1, p2, p3)
+                out[f"{aid}_deg"] = float(ang)
         except Exception as e:
-            print(f"Warning: Could not compute angle {angle_id}: {e}")
-            angles[f"{angle_id}_deg"] = 0.0
+            print(f"Warning: Could not compute angle {a.get('id')}: {e}")
+            out[f"{a.get('id')}_deg"] = 0.0
     
-    # Add enhanced biomechanical angles if available
-    if SCIPY_AVAILABLE:
+    # 4) Zusatzwinkel: Trunk Inclination (nur wenn nicht schon vorhanden)
+    if "trunk_deg" not in out and "trunk_inclination_deg" not in out:
         try:
-            # Trunk inclination
             shoulder = _get_enhanced_xy(pose, side, "shoulder")
             hip = _get_enhanced_xy(pose, side, "hip")
-            vertical = np.array([0, -1])  # Upward vertical
-            trunk_vector = shoulder - hip
-            trunk_angle = _vector_angle_2d(trunk_vector, vertical)
-            angles["trunk_inclination_deg"] = float(trunk_angle)
-            
-            # Knee alignment (valgus/varus assessment)
-            hip_pos = _get_enhanced_xy(pose, side, "hip")
-            knee_pos = _get_enhanced_xy(pose, side, "knee")
-            ankle_pos = _get_enhanced_xy(pose, side, "ankle")
-            
-            # Calculate knee alignment relative to vertical line through hip
-            hip_ankle_vector = ankle_pos - hip_pos
-            hip_knee_vector = knee_pos - hip_pos
-            alignment_angle = _vector_angle_2d(hip_knee_vector, hip_ankle_vector)
-            angles["knee_alignment_deg"] = float(alignment_angle)
-            
-        except Exception as e:
-            print(f"Warning: Could not compute enhanced angles: {e}")
+            vertical = np.array([0.0, -1.0])
+            trunk = shoulder - hip
+            nu = np.linalg.norm(vertical); nv = np.linalg.norm(trunk)
+            if nu>0 and nv>0:
+                c = np.clip(np.dot(vertical/nu, trunk/nv), -1.0, 1.0)
+                out["trunk_inclination_deg"] = float(np.degrees(np.arccos(c)))
+        except Exception:
+            pass
     
-    return angles
-
-def _get_enhanced_xyz(pose: Dict[str, Any], side: str, joint: str) -> np.ndarray:
-    """Get 3D coordinates for enhanced calculations."""
-    try:
-        idx = LMS[f"{side}_{joint.upper()}"]
-        lm = pose["landmarks"][idx]
-        return np.array([lm["x"], lm["y"], lm["z"]])
-    except (KeyError, IndexError):
-        raise ValueError(f"Joint {side}_{joint} not found or invalid")
-
-def _compute_2d_angle(p1: np.ndarray, p2: np.ndarray, p3: np.ndarray) -> float:
-    """Compute angle between three 2D points."""
-    v1 = p1 - p2
-    v2 = p3 - p2
-    
-    # Normalize vectors
-    v1_norm = np.linalg.norm(v1)
-    v2_norm = np.linalg.norm(v2)
-    
-    if v1_norm == 0 or v2_norm == 0:
-        return 0.0
-    
-    v1_unit = v1 / v1_norm
-    v2_unit = v2 / v2_norm
-    
-    # Calculate angle using dot product
-    cos_angle = np.clip(np.dot(v1_unit, v2_unit), -1.0, 1.0)
-    angle_rad = np.arccos(cos_angle)
-    angle_deg = np.degrees(angle_rad)
-    
-    return angle_deg
-
-def _compute_3d_angle(p1: np.ndarray, p2: np.ndarray, p3: np.ndarray) -> float:
-    """Compute angle between three 3D points."""
-    v1 = p1 - p2
-    v2 = p3 - p2
-    
-    # Normalize vectors
-    v1_norm = np.linalg.norm(v1)
-    v2_norm = np.linalg.norm(v2)
-    
-    if v1_norm == 0 or v2_norm == 0:
-        return 0.0
-    
-    v1_unit = v1 / v1_norm
-    v2_unit = v2 / v2_norm
-    
-    # Calculate angle using dot product
-    cos_angle = np.clip(np.dot(v1_unit, v2_unit), -1.0, 1.0)
-    angle_rad = np.arccos(cos_angle)
-    angle_deg = np.degrees(angle_rad)
-    
-    return angle_deg
-
-def _vector_angle_2d(v1: np.ndarray, v2: np.ndarray) -> float:
-    """Calculate angle between two 2D vectors."""
-    v1_norm = np.linalg.norm(v1)
-    v2_norm = np.linalg.norm(v2)
-    
-    if v1_norm == 0 or v2_norm == 0:
-        return 0.0
-    
-    cos_angle = np.clip(np.dot(v1, v2) / (v1_norm * v2_norm), -1.0, 1.0)
-    angle_rad = np.arccos(cos_angle)
-    return np.degrees(angle_rad)
-
-# --- Legacy Functions for Backward Compatibility ---
-def get_enhanced_pose_vector(image_path: str, confidence_threshold: float = 0.5) -> Dict[str, Any]:
-    """Legacy function - calls unified get_pose_vector with enhanced=True."""
-    return get_pose_vector(image_path, confidence_threshold, enhanced=True)
-
-def compute_enhanced_angles_config(pose: Dict[str, Any], cfg: Dict[str, Any], use_3d: bool = False) -> Dict[str, float]:
-    """Legacy function - calls unified compute_angles_config."""
-    return compute_angles_config(pose, cfg, use_3d)
-
-# --- Simplified Moment Estimation (Optional) ---
-def estimate_moments_config(cfg: Dict[str, Any], angles: Dict[str, float], 
-                          body_mass_kg: float, external_load_kg: float) -> Dict[str, float]:
-    """
-    Basic moment estimation for backward compatibility.
-    Note: Moments functionality has been simplified/removed from main analysis.
-    """
-    moments = {}
-    
-    # Only calculate if moments are defined in config (for backward compatibility)
-    for moment_id, formula in cfg.get("moments", {}).items():
-        try:
-            # Simple evaluation context
-            total_N = (body_mass_kg + external_load_kg) * 9.81
-            
-            # Replace angle references
-            eval_formula = formula
-            for angle_key, angle_value in angles.items():
-                if angle_key.endswith("_deg"):
-                    angle_name = angle_key.replace("_deg", "")
-                    eval_formula = eval_formula.replace(f"angles.{angle_name}", str(angle_value))
-            
-            # Replace functions
-            eval_formula = eval_formula.replace("sin_deg", "math.sin(math.radians")
-            eval_formula = eval_formula.replace("cos_deg", "math.cos(math.radians")
-            eval_formula = eval_formula.replace("total_N", str(total_N))
-            
-            # Evaluate (basic safety - only allow math operations)
-            if all(char in "0123456789+-*/.() math.sincoradnstg" for char in eval_formula.replace(" ", "")):
-                result = eval(eval_formula, {"math": math}, {})
-                moments[f"{moment_id}_moment_Nm"] = max(0.0, float(result))
-            else:
-                moments[f"{moment_id}_moment_Nm"] = 0.0
-                
-        except Exception as e:
-            print(f"Warning: Could not calculate moment {moment_id}: {e}")
-            moments[f"{moment_id}_moment_Nm"] = 0.0
-    
-    return moments
-
-def estimate_enhanced_moments_config(cfg: Dict[str, Any], angles: Dict[str, float], 
-                                   body_mass_kg: float, external_load_kg: float, 
-                                   height_cm: float) -> Dict[str, float]:
-    """
-    Legacy function - calls basic moment estimation.
-    Enhanced moment calculation has been removed from main analysis.
-    """
-    return estimate_moments_config(cfg, angles, body_mass_kg, external_load_kg)
+    return out

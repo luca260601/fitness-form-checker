@@ -9,18 +9,40 @@ ALLOWED_TARGETS = {"knee","hip","shoulder","elbow"}
 
 YAML_GUIDE = """\
 name: <Name>
-aliases: [<Alias1>, <Alias2>]
-targets: [<knee|hip|shoulder|elbow>, ...]
-segments:
-  - [<point>, <point>]
+description: "<1-2 Sätze>"
+aliases: [<...>]
+targets: [knee, hip, shoulder, elbow]
+segments: [[shoulder, hip], [hip, knee], [knee, ankle], [shoulder, elbow], [elbow, wrist]]
+
 angles:
-  - id: <short_id>
+  - id: <id>
     label: <Label>
     points: [<A>, <B>, <C>]
+    # Neu:
+    description: "<kurz>"
+    per_phase:
+      bottom: [<lo>, <hi>]
+      top: [<lo>, <hi>]
+
 overlays:
-  arrows_at: [<joint>, ...]
-moments:
-  <joint>: "<EXPR using total_N / per_arm_N / angles.id / sin_deg / cos_deg>"
+  arrows_at: [knee, hip, elbow]
+
+# Neu:
+thresholds:
+  knee_angle: { excellent: [80,110], good: [60,140], needs_work: [45,150] }
+
+form_cues:
+  excessive_forward_lean: "Halte den Oberkörper aufrechter."
+  elbow_flare: "Ellenbogen näher am Körper führen."
+
+safety_checks:
+  min_knee_angle: 45
+  max_trunk_lean: 45
+
+meta:
+  source_pdf_path: "<auto>"
+  provenance: ["pdf", "inferred"]
+
 """
 
 SYSTEM = "Erzeuge ausschließlich YAML (ohne Erklärtext)."

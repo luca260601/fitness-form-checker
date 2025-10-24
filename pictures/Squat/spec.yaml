@@ -1,0 +1,25 @@
+angles:
+- id: knee
+  type: three_point
+  points:
+  - hip
+  - knee
+  - ankle
+- id: hip
+  type: three_point
+  points:
+  - shoulder
+  - hip
+  - knee
+- id: ankle
+  type: three_point
+  points:
+  - knee
+  - ankle
+  - heel
+- id: trunk
+  type: three_point
+  points:
+  - hip_down
+  - hip
+  - shoulder

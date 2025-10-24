@@ -1,0 +1,12 @@
+{
+  "images": {
+    "good/latt2.jpg": {
+      "quality": "good",
+      "labels": []
+    },
+    "good/latt3.jpeg": {
+      "quality": "good",
+      "labels": []
+    }
+  }
+}

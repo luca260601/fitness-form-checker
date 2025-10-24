@@ -1,68 +1,95 @@
-name: "Squat"
-description: "Comprehensive squat analysis for proper form assessment"
-aliases: [Kniebeuge, Back Squat, Front Squat, Enhanced Squat]
-targets: [knee, hip]
-
-# Body segments to visualize
+name: Squat
+description: Comprehensive squat analysis for proper form assessment
+aliases:
+- Kniebeuge
+- Back Squat
+- Front Squat
+- Enhanced Squat
+targets:
+- knee
+- hip
 segments:
-  - ["shoulder", "hip"]
-  - ["hip", "knee"] 
-  - ["knee", "ankle"]
-  - ["shoulder", "elbow"]
-  - ["elbow", "wrist"]
-
-# Angles to calculate
+- - shoulder
+  - hip
+- - hip
+  - knee
+- - knee
+  - ankle
+- - shoulder
+  - elbow
+- - elbow
+  - wrist
 angles:
-  - id: "knee"
-    label: "Knie"
-    points: ["hip", "knee", "ankle"]
-    description: "Knee flexion angle (180° = straight, <90° = deep squat)"
-    
-  - id: "hip" 
-    label: "Hüfte"
-    points: ["shoulder", "hip", "knee"]
-    description: "Hip flexion angle"
-    
-  - id: "ankle"
-    label: "Sprunggelenk"
-    points: ["knee", "ankle", "heel"]
-    description: "Ankle dorsiflexion angle"
-    
-  - id: "trunk"
-    label: "Rumpf"
-    points: ["hip_down", "hip", "shoulder"]
-    description: "Trunk inclination from vertical"
-
-# Visualization settings (no force arrows since moments removed)
+- id: knee
+  label: Knie
+  points:
+  - hip
+  - knee
+  - ankle
+  description: Knee flexion angle (180° = straight, <90° = deep squat)
+- id: hip
+  label: Hüfte
+  points:
+  - shoulder
+  - hip
+  - knee
+  description: Hip flexion angle
+- id: ankle
+  label: Sprunggelenk
+  points:
+  - knee
+  - ankle
+  - heel
+  description: Ankle dorsiflexion angle
+- id: trunk
+  label: Rumpf
+  points:
+  - hip_down
+  - hip
+  - shoulder
+  description: Trunk inclination from vertical
 overlays:
   arrows_at: []
-
-# Analysis thresholds and recommendations
 thresholds:
   knee_angle:
-    excellent: [80, 120]
-    good: [70, 130] 
-    needs_work: [60, 140]
-    
+    excellent:
+    - 80
+    - 120
+    good:
+    - 70
+    - 130
+    needs_work:
+    - 60
+    - 140
   hip_angle:
-    excellent: [70, 110]
-    good: [60, 120]
-    needs_work: [50, 130]
-    
+    excellent:
+    - 70
+    - 110
+    good:
+    - 60
+    - 120
+    needs_work:
+    - 50
+    - 130
   trunk_angle:
-    excellent: [0, 15]
-    good: [0, 25]
-    needs_work: [0, 35]
-
-# Form cues based on measurements
+    excellent:
+    - 0
+    - 15
+    good:
+    - 0
+    - 25
+    needs_work:
+    - 0
+    - 35
 form_cues:
-  knee_too_straight: "Gehe tiefer in die Hocke für bessere Muskelaktivierung"
-  knee_too_bent: "Achte auf kontrollierte Bewegung, nicht zu tief"
-  excessive_forward_lean: "Halte den Oberkörper aufrechter"
-  knee_valgus: "Drücke die Knie nach außen"
-  heel_lift: "Halte die Fersen am Boden"
-
-# Safety warnings
+  knee_too_straight: Gehe tiefer in die Hocke für bessere Muskelaktivierung
+  knee_too_bent: Achte auf kontrollierte Bewegung, nicht zu tief
+  excessive_forward_lean: Halte den Oberkörper aufrechter
+  knee_valgus: Drücke die Knie nach außen
+  heel_lift: Halte die Fersen am Boden
 safety_checks:
-  min_knee_angle: 45    # degrees
-  max_trunk_lean: 45    # degrees
+  min_knee_angle: 45
+  max_trunk_lean: 45
+meta:
+  pictures_dir: /Users/andrejegli/Documents/Schule/OST/Semester3/AI_Foundation/projekt/pictures/Squat
+  refdb_path: /Users/andrejegli/Documents/Schule/OST/Semester3/AI_Foundation/projekt/ref.db

@@ -1,0 +1,616 @@
+# utils/register_flow.py
+from __future__ import annotations
+import os, sys, json, math, shutil, glob, re
+from pathlib import Path
+from typing import Dict, List, Tuple, Any, Optional
+
+# Drittanbieter
+try:
+    import yaml  # PyYAML
+except ImportError:
+    print("Bitte installieren: pip install pyyaml", file=sys.stderr); raise
+try:
+    from pypdf import PdfReader
+except Exception:
+    PdfReader = None
+    
+import sqlite3, time, hashlib
+
+# Projektmodule
+from utils.bootstrap_fs import ensure_picture_tree
+from pose_service.engine import get_pose_vector  # liefert Keypoints aus Bild
+
+# ────────────────────────────────────────────────────────────────────────────────
+# Hilfen
+# ────────────────────────────────────────────────────────────────────────────────
+
+def slugify(name: str) -> str:
+    s = name.strip().lower()
+    s = re.sub(r"[^\w\s-]", "", s, flags=re.UNICODE)
+    s = re.sub(r"[\s]+", "_", s)
+    return s
+
+def ask(prompt: str, default: str = "") -> str:
+    msg = f"{prompt} "
+    if default: msg += f"[{default}] "
+    v = input(msg).strip()
+    return v or default
+
+def read_pdf_text(pdf_path: Path) -> str:
+    if not pdf_path or not pdf_path.exists() or PdfReader is None:
+        return ""
+    try:
+        reader = PdfReader(str(pdf_path))
+        return "\n".join((p.extract_text() or "") for p in reader.pages)
+    except Exception:
+        return ""
+
+def read_yaml(path: Path) -> Dict[str, Any]:
+    return yaml.safe_load(path.read_text(encoding="utf-8")) if path.exists() else {}
+
+def write_yaml(path: Path, data: Dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as f:
+        yaml.safe_dump(data, f, sort_keys=False, allow_unicode=True)
+
+def load_labels_json(pictures_dir: Path) -> Dict[str, Any]:
+    """Lädt labels.json robust und migriert alt -> neu:
+       - garantiert Top-Level 'images' (dict)
+       - migriert 'label' -> 'labels' (Liste[str])
+    """
+    p = pictures_dir / "labels.json"
+    data: Dict[str, Any] = {}
+    if p.exists():
+        try:
+            data = json.loads(p.read_text(encoding="utf-8")) or {}
+        except Exception:
+            data = {}
+    if not isinstance(data, dict):
+        data = {}
+    imgs = data.get("images")
+    if not isinstance(imgs, dict):
+        imgs = {}
+    # Migration: 'label' (str) -> 'labels' (list[str])
+    for k, v in list(imgs.items()):
+        if isinstance(v, dict):
+            if "labels" not in v:
+                if "label" in v:
+                    lab = v.get("label")
+                    if isinstance(lab, str):
+                        v["labels"] = [lab] if lab.strip() else []
+                    elif isinstance(lab, list):
+                        v["labels"] = [str(x) for x in lab]
+                    else:
+                        v["labels"] = []
+                    v.pop("label", None)
+            else:
+                labs = v.get("labels")
+                if isinstance(labs, str):
+                    v["labels"] = [labs] if labs.strip() else []
+                elif isinstance(labs, list):
+                    v["labels"] = [str(x) for x in labs]
+                else:
+                    v["labels"] = []
+    data["images"] = imgs
+    return data
+
+def save_labels_json(pictures_dir: Path, data: Dict[str, Any]) -> None:
+    (pictures_dir / "labels.json").write_text(
+        json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
+
+def _sha256(path: Path, chunk=1024*1024) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for b in iter(lambda: f.read(chunk), b""):
+            h.update(b)
+    return h.hexdigest()
+
+def copy_image(src: Path, dst_dir: Path) -> Path:
+    dst_dir.mkdir(parents=True, exist_ok=True)
+    src = src.expanduser().resolve()
+
+    # schon im Zielordner?
+    if src.parent.resolve() == dst_dir.resolve():
+        return src
+
+    candidate = dst_dir / src.name
+    if candidate.exists():
+        try:
+            if _sha256(candidate) == _sha256(src):
+                return candidate  # identisch → nicht erneut kopieren
+        except Exception:
+            pass
+
+    out = candidate
+    i = 1
+    while out.exists():
+        out = dst_dir / f"{src.stem}_{i}{src.suffix}"
+        i += 1
+    shutil.copy2(src, out)
+    return out
+
+# ────────────────────────────────────────────────────────────────────────────────
+# Keypoints & Winkel
+# ────────────────────────────────────────────────────────────────────────────────
+
+def ensure_keypoints_for_dir(img_dir: Path) -> Tuple[int,int]:
+    ok = fail = 0
+    for img in sorted(img_dir.glob("*")):
+        if img.suffix.lower() not in {".jpg",".jpeg",".png",".bmp",".webp"}:
+            continue
+        out = img.with_suffix(img.suffix + ".keypoints.json")
+        if out.exists(): continue
+        try:
+            kps = get_pose_vector(str(img))
+            out.write_text(json.dumps(kps, indent=2), encoding="utf-8")
+            ok += 1
+        except Exception as e:
+            print(f"Keypoints fehlgeschlagen für {img.name}: {e}", file=sys.stderr)
+            fail += 1
+    return ok, fail
+
+def load_kps(kp_json: Path) -> Dict[str, Tuple[float, float]]:
+    """Normalisiert verschiedene Keypoint-Formate auf {name: (x, y)}."""
+    data = json.loads(kp_json.read_text(encoding="utf-8"))
+
+    # Containerfelder erkennen
+    d = None
+    for k in ("keypoints", "points", "landmarks"):
+        if isinstance(data, dict) and k in data:
+            d = data[k]
+            break
+    if d is None:
+        d = data
+
+    out: Dict[str, Tuple[float, float]] = {}
+
+    # Dict-Form
+    if isinstance(d, dict):
+        for k, v in d.items():
+            x = y = None
+            if isinstance(v, (list, tuple)) and len(v) >= 2:
+                x, y = v[0], v[1]
+            elif isinstance(v, dict):
+                cand = v.get("position", v)
+                for kx, ky in (("x","y"), ("X","Y"), ("cx","cy"), ("u","v"),
+                               ("pixel_x","pixel_y"), (0,1)):
+                    if kx in cand and ky in cand:
+                        x, y = cand[kx], cand[ky]; break
+            if x is not None and y is not None:
+                try:
+                    out[str(k)] = (float(x), float(y))
+                except Exception:
+                    pass
+
+    # Listen-Form
+    elif isinstance(d, list):
+        for item in d:
+            if not isinstance(item, dict):
+                continue
+            name = item.get("name") or item.get("id") or item.get("joint") or item.get("key")
+            pos = item.get("position") if isinstance(item.get("position"), dict) else item
+            x = pos.get("x") if isinstance(pos, dict) else None
+            y = pos.get("y") if isinstance(pos, dict) else None
+            if x is None: x = pos.get("X") or pos.get("cx") or pos.get("u") or pos.get("pixel_x")
+            if y is None: y = pos.get("Y") or pos.get("cy") or pos.get("v") or pos.get("pixel_y")
+            if name and x is not None and y is not None:
+                try:
+                    out[str(name)] = (float(x), float(y))
+                except Exception:
+                    pass
+        # Falls noch leer und 'd' ist Liste von Punkten ohne Namen: Index-zu-Name-Mapping versuchen
+    
+    if not out and isinstance(d, list) and all(isinstance(it, dict) for it in d):
+        BLAZE33 = ["nose","left_eye_inner","left_eye","left_eye_outer","right_eye_inner","right_eye",
+                   "right_eye_outer","left_ear","right_ear","mouth_left","mouth_right",
+                   "left_shoulder","right_shoulder","left_elbow","right_elbow","left_wrist","right_wrist",
+                   "left_pinky","right_pinky","left_index","right_index","left_thumb","right_thumb",
+                   "left_hip","right_hip","left_knee","right_knee","left_ankle","right_ankle",
+                   "left_heel","right_heel","left_foot_index","right_foot_index"]
+        W = H = 1.0
+        if isinstance(data, dict) and isinstance(data.get("image_size"), dict):
+            W = float(data["image_size"].get("width") or 1.0)
+            H = float(data["image_size"].get("height") or 1.0)
+        for i, it in enumerate(d[:len(BLAZE33)]):
+            x = it.get("x"); y = it.get("y")
+            if x is not None and y is not None:
+                try:
+                    out[BLAZE33[i]] = (float(x)*W, float(y)*H)
+                except Exception:
+                    pass
+
+    # --- Aliases für Lunges: front_* / rear_* anhand x-Position der Knöchel ---
+    if "left_ankle" in out and "right_ankle" in out:
+        front = "left" if out["left_ankle"][0] > out["right_ankle"][0] else "right"
+        rear  = "right" if front == "left" else "left"
+        for part in ["hip","knee","ankle","heel","foot_index"]:
+            l, r = f"left_{part}", f"right_{part}"
+            if l in out and r in out:
+                out[f"front_{part}"] = out[l] if front=="left" else out[r]
+                out[f"rear_{part}"]  = out[r] if front=="left" else out[l]
+
+    return out
+
+def collect_available_joints(good_dir: Path) -> List[str]:
+    joints = set()
+    for p in sorted(good_dir.glob("*.keypoints.json")):
+        try:
+            kps = load_kps(p)
+            joints.update(kps.keys())
+        except Exception:
+            pass
+    return sorted(joints)
+
+def angle_3pt(a, b, c) -> float:
+    import numpy as np
+    ba = np.array(a) - np.array(b)
+    bc = np.array(c) - np.array(b)
+    nba, nbc = np.linalg.norm(ba), np.linalg.norm(bc)
+    if nba < 1e-6 or nbc < 1e-6: return float("nan")
+    cosang = np.clip(ba.dot(bc) / (nba*nbc), -1.0, 1.0)
+    return float(np.degrees(np.arccos(cosang)))
+
+def compute_empirical_means(good_dir: Path, angle_defs: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    """Unterstützt:
+       - klassische 3-Punkt-Winkel: points=[A,B,C] → ∠ABC
+       - vertikal vs Linie: points=["vertical", B, C] → Winkel von BC zur Vertikalen
+    """
+
+    import numpy as np
+    acc: Dict[str, List[float]] = {a["id"]: [] for a in angle_defs}
+    for kp_json in sorted(good_dir.glob("*.keypoints.json")):
+        kps = load_kps(kp_json)
+        for a in angle_defs:
+            aid = a.get("id")
+            pts = a.get("points", [])
+            if not aid or not isinstance(pts, list): continue
+            val = float("nan")
+            try:
+                if len(pts)==3 and pts[0]=="vertical":
+                    b, c = pts[1], pts[2]
+                    if b in kps and c in kps:
+                        u = np.array(kps[c]) - np.array(kps[b])
+                        v = np.array([0.0, -1.0])   # vertikal nach oben
+                        nu, nv = np.linalg.norm(u), np.linalg.norm(v)
+                        if nu > 1e-6 and nv > 1e-6:
+                            cosang = np.clip(u.dot(v)/(nu*nv), -1.0, 1.0)
+                            val = float(np.degrees(np.arccos(cosang)))
+                elif len(pts)==3 and all(p in kps for p in pts):
+                    val = angle_3pt(kps[pts[0]], kps[pts[1]], kps[pts[2]])
+            except Exception:
+                val = float("nan")
+            if math.isfinite(val):
+                acc[aid].append(val)
+    return {aid: {"mean": round(sum(vals)/len(vals), 2), "n": len(vals)}
+            for aid, vals in acc.items() if vals}
+
+# ────────────────────────────────────────────────────────────────────────────────
+# LLM: Winkel aus PDF + verfügbaren Gelenken ableiten
+# ────────────────────────────────────────────────────────────────────────────────
+
+def propose_angles_via_llm(ex_name: str, pdf_text: str, joints: List[str]) -> List[Dict[str, Any]]:
+    """
+    Erwartet: OPENAI_API_KEY in der Umgebung.
+    Gibt Liste von {"id","label","points":[...]} zurück.
+    'points' müssen aus 'joints' stammen; für Rumpf ist 'vertical' als erster Punkt erlaubt.
+    """
+    try:
+        from openai import OpenAI
+        import os as _os
+        if not _os.getenv("OPENAI_API_KEY"):
+            raise RuntimeError("OPENAI_API_KEY fehlt")
+        client = OpenAI()
+
+        sysmsg = (
+            "Du bist ein Sport-Biomechanik-Assistent. Du definierst Messwinkel für eine Übung.\n"
+            "Regeln:\n"
+            "- Gib NUR JSON zurück, ohne Erklärung.\n"
+            "- Feld 'angles': Liste von Objekten: {id (snake_case), label, points}.\n"
+            "- 'points' ist eine Liste mit GENAU 3 Einträgen.\n"
+            "- Verwendbare Punktnamen sind ausschließlich aus 'allowed_joints'.\n"
+            "- Ausnahme: Für einen Rumpfwinkel darf 'points' = ['vertical', B, C] sein (Winkel der Linie BC gegen Vertikal).\n"
+            "- Wähle 2–6 aussagekräftige Winkel, passend zur Übung.\n"
+            "- Vermeide Duplikate; 'id' eindeutig, engl. snake_case.\n"
+        )
+        usr = json.dumps({
+            "exercise_name": ex_name,
+            "allowed_joints": joints,
+            "pdf_excerpt": (pdf_text[:6000] if pdf_text else "")
+        }, ensure_ascii=False)
+
+        resp = client.chat.completions.create(
+            model="gpt-4o-mini",
+            temperature=0.2,
+            messages=[{"role":"system","content":sysmsg},
+                      {"role":"user","content":usr}],
+            response_format={"type":"json_object"},
+        )
+        raw = resp.choices[0].message.content
+        obj = json.loads(raw)
+        angles = obj.get("angles") or []
+    except Exception:
+        angles = []
+
+    # Validieren & filtern
+    ok_angles = []
+    seen = set()
+    for a in angles:
+        aid = str(a.get("id","")).strip()
+        pts = a.get("points")
+        lbl = a.get("label") or aid
+        if not aid or not isinstance(pts, list) or len(pts)!=3:
+            continue
+        # Erlaubt: ['vertical', B, C]  ODER  alle drei in joints
+        if pts[0]=="vertical":
+            if not (pts[1] in joints and pts[2] in joints):
+                continue
+        else:
+            if not all(p in joints for p in pts):
+                continue
+        if aid in seen: 
+            continue
+        ok_angles.append({"id":aid, "label":lbl, "points":pts})
+        seen.add(aid)
+
+    return ok_angles
+
+# Fallback-Heuristik, falls LLM nichts brauchbares liefert
+def fallback_angles(joints: List[str]) -> List[Dict[str, Any]]:
+    cand = []
+    J = set(joints)
+    def has(*k): return all(x in J for x in k)
+
+    # Front/Rear bevorzugen, wenn vorhanden
+    if has("front_hip","front_knee","front_ankle"):
+        cand.append({"id":"front_knee","label":"Front Knee","points":["front_hip","front_knee","front_ankle"]})
+    if has("rear_hip","rear_knee","rear_ankle"):
+        cand.append({"id":"rear_knee","label":"Rear Knee","points":["rear_hip","rear_knee","rear_ankle"]})
+
+    # linkes/rechtes Knie als Fallback
+    if has("left_hip","left_knee","left_ankle"):
+        cand.append({"id":"left_knee","label":"Left Knee","points":["left_hip","left_knee","left_ankle"]})
+    if has("right_hip","right_knee","right_ankle"):
+        cand.append({"id":"right_knee","label":"Right Knee","points":["right_hip","right_knee","right_ankle"]})
+
+    # Hüfte & Rumpf (Vertikalbezug)
+    if has("left_shoulder","left_hip") or has("right_shoulder","right_hip"):
+        # wähle die Seite mit mehr Gelenken
+        side = "left" if has("left_shoulder","left_hip") else "right"
+        cand.append({"id":"trunk","label":"Trunk","points":["vertical", f"{side}_hip", f"{side}_shoulder"]})
+    return cand[:6]  # max. 6 Winkel
+
+# ────────────────────────────────────────────────────────────────────────────────
+# Knowledge
+# ────────────────────────────────────────────────────────────────────────────────
+
+def create_knowledge_from_pdf(pdf_path: Path, slug: str) -> Path:
+    knowledge_dir = Path("knowledge"); knowledge_dir.mkdir(parents=True, exist_ok=True)
+    out_md = knowledge_dir / f"{slug}.md"
+    text = read_pdf_text(pdf_path)
+    # Optional LLM, sonst Fallback
+    md = f"# {slug.replace('_',' ').title()}\n\n"
+    if text:
+        try:
+            from openai import OpenAI; import os as _os
+            if not _os.getenv("OPENAI_API_KEY"): raise RuntimeError
+            client = OpenAI()
+            system = ("Erzeuge eine klare, praxisnahe Knowledge-Card (Markdown) zur Übung: "
+                      "Setup, Technik-Cues, häufige Fehler, Sicherheit, Progression.")
+            user = "Quelle (PDF-Auszug):\n" + text[:8000]
+            r = client.chat.completions.create(
+                model="gpt-4o-mini",
+                temperature=0.3,
+                messages=[{"role":"system","content":system},{"role":"user","content":user}],
+            )
+            md = r.choices[0].message.content or md + "*(kein Inhalt)*"
+        except Exception:
+            md += "## Kurzüberblick\n\n" + text[:2000]
+    else:
+        md += "*(Keine PDF-Texte extrahiert)*"
+    out_md.write_text(md, encoding="utf-8")
+    return out_md
+
+# ────────────────────────────────────────────────────────────────────────────────
+# Interaktiver Flow
+# ────────────────────────────────────────────────────────────────────────────────
+
+def import_images_with_labels(ex_name: str, pictures_dir: Path, refdb_path: str) -> None:
+    labels = load_labels_json(pictures_dir)
+    images = labels.setdefault("images", {})
+    good_dir = pictures_dir / "good"
+    bad_dir  = pictures_dir / "bad"
+
+    print("\nGUTE Bilder hinzufügen (Enter = weiter):")
+    while True:
+        p = ask("Pfad zu gutem Bild (leer = weiter):", "")
+        if not p:
+            break
+        src = Path(p).expanduser().resolve()
+        if not src.exists():
+            print("  ❌ Datei nicht gefunden:", src); continue
+        out = copy_image(src, good_dir)
+
+        # Mehrere Labels erfassen
+        lbls: List[str] = []
+        print("Labels vergeben (mehrere nacheinander; leere Eingabe beendet):")
+        while True:
+            l = ask("  Label:", "")
+            if not l:
+                break
+            lbls.append(l.strip())
+
+        images[f"good/{out.name}"] = {"quality": "good", "labels": lbls}
+        ensure_refdb(refdb_path)
+        img_sha = _sha256(out)
+        img_id  = upsert_image(refdb_path, str(out), "good", img_sha)   # bzw. "bad"
+        upsert_labels(refdb_path, img_id, lbls)
+
+    print("\nSCHLECHTE Bilder hinzufügen (Enter = weiter):")
+    while True:
+        p = ask("Pfad zu schlechtem Bild (leer = weiter):", "")
+        if not p:
+            break
+        src = Path(p).expanduser().resolve()
+        if not src.exists():
+            print("  ❌ Datei nicht gefunden:", src); continue
+        out = copy_image(src, bad_dir)
+
+        lbls: List[str] = []
+        print("Labels vergeben (mehrere nacheinander; leere Eingabe beendet):")
+        while True:
+            l = ask("  Label:", "")
+            if not l:
+                break
+            lbls.append(l.strip())
+
+        images[f"bad/{out.name}"] = {"quality": "bad", "labels": lbls}
+
+    save_labels_json(pictures_dir, labels)
+    print("✓ labels.json aktualisiert.")
+
+def register_exercise_flow() -> None:
+    print("\nÜbung registrieren (PDF + Bilder) – interaktiv")
+    name = ask("Name der Übung:", "").strip()
+    if not name: 
+        print("Abgebrochen (kein Name)."); return
+    slug = slugify(name)
+
+    pdf_path_s = ask("Pfad zur PDF:", "")
+    pdf_path = Path(pdf_path_s).expanduser() if pdf_path_s else Path()
+    pdf_text = read_pdf_text(pdf_path)
+    knowledge_md = create_knowledge_from_pdf(pdf_path, slug)
+
+    # 1) Dateistruktur & leere YAML anlegen (mit Platzhaltern)
+    yaml_path = Path("data")/"exercises"/f"{slug}.yaml"
+
+    # Stub-YAML anlegen, damit ensure_picture_tree sie lesen kann
+    stub_cfg = {
+        "name": name,
+        "aliases": [name],
+        "angles": [],
+        "empirical": {"means": {}},
+        "knowledge_ref": f"knowledge/{slug}.md",
+        "meta": {}
+    }
+    write_yaml(yaml_path, stub_cfg)
+
+    # Jetzt erst Strukturen erzeugen
+    res = ensure_picture_tree(os.getcwd(), name, str(yaml_path))
+    pictures_dir = Path(res["pictures_dir"])
+    good_dir     = Path(res["good_dir"])
+    
+    # Immer database/ref.db nutzen
+    db_dir = Path("database"); db_dir.mkdir(exist_ok=True)
+    refdb_path = str(db_dir / "ref.db")
+    ensure_refdb(refdb_path)
+        
+    # 2) Bilder importieren
+    import_images_with_labels(name, pictures_dir)
+
+    # 3) Keypoints für gute Bilder
+    ok, fail = ensure_keypoints_for_dir(good_dir)
+    if ok or fail: print(f"Keypoints: OK={ok}, FAIL={fail}")
+    
+
+    # 4) Verfügbare Gelenke sammeln
+    joints = collect_available_joints(good_dir)
+    if not joints:
+        print("⚠️  Keine Keypoints gefunden – Abbruch."); return
+
+    # 5) Winkel via LLM vorschlagen (fallback, falls leer)
+    llm_angles = propose_angles_via_llm(name, pdf_text, joints)
+    if not llm_angles:
+        print("⚠️  LLM konnte keine Winkel liefern – nutze Fallback.")
+        llm_angles = ensure_ui_angles(llm_angles, joints)
+    spec_path = pictures_dir / "spec.yaml"
+    spec_data = {"angles": [{"id": a["id"], "points": a["points"]} for a in llm_angles]}
+    spec_path.write_text(yaml.safe_dump(spec_data, sort_keys=False, allow_unicode=True), encoding="utf-8")
+
+    # 6) Empirische Mittelwerte berechnen
+    means = compute_empirical_means(good_dir, llm_angles)
+
+
+    # 8) YAML schreiben (vollständiges, dynamisches Raster)
+    cfg = {
+        "name": name,
+        "aliases": [name],
+        "angles": llm_angles,
+        "empirical": {"means": means},
+        "knowledge_ref": str(knowledge_md),
+        "meta": {
+            "pictures_dir": str(pictures_dir),
+            "refdb_path": res["refdb_path"],
+            "joints_seen": joints,
+        }
+    }
+    write_yaml(yaml_path, cfg)
+
+    print("\n✓ Registrierung abgeschlossen")
+    print("  YAML:", yaml_path)
+    print("  Knowledge:", knowledge_md)
+    print("  Bilder:", pictures_dir)
+    
+def ensure_ui_angles(angle_defs: List[Dict[str,Any]], joints: List[str]) -> List[Dict[str,Any]]:
+    ids = {a["id"] for a in angle_defs}
+    J   = set(joints)
+    def add(a): 
+        if a["id"] not in ids:
+            angle_defs.append(a); ids.add(a["id"])
+    # Knie links/rechts
+    if {"left_hip","left_knee","left_ankle"} <= J and "left_knee" not in ids:
+        add({"id":"left_knee","label":"Left Knee","points":["left_hip","left_knee","left_ankle"]})
+    if {"right_hip","right_knee","right_ankle"} <= J and "right_knee" not in ids:
+        add({"id":"right_knee","label":"Right Knee","points":["right_hip","right_knee","right_ankle"]})
+    # Front/Rear falls verfügbar (Lunges)
+    if {"front_hip","front_knee","front_ankle"} <= J and "front_knee" not in ids:
+        add({"id":"front_knee","label":"Front Knee","points":["front_hip","front_knee","front_ankle"]})
+    if {"rear_hip","rear_knee","rear_ankle"} <= J and "rear_knee" not in ids:
+        add({"id":"rear_knee","label":"Rear Knee","points":["rear_hip","rear_knee","rear_ankle"]})
+    # Rumpf zur Vertikalen (Seite wählen, die vorhanden ist)
+    if {"left_hip","left_shoulder"} <= J and "trunk" not in ids:
+        add({"id":"trunk","label":"Trunk","points":["vertical","left_hip","left_shoulder"]})
+    elif {"right_hip","right_shoulder"} <= J and "trunk" not in ids:
+        add({"id":"trunk","label":"Trunk","points":["vertical","right_hip","right_shoulder"]})
+    return angle_defs
+
+
+def ensure_refdb(refdb_path: str):
+    con = sqlite3.connect(refdb_path); cur = con.cursor()
+    cur.execute("""CREATE TABLE IF NOT EXISTS images(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        path TEXT UNIQUE,
+        quality TEXT,
+        sha256 TEXT,
+        created_at REAL
+    )""")
+    cur.execute("""CREATE TABLE IF NOT EXISTS image_labels(
+        image_id INTEGER,
+        label TEXT,
+        UNIQUE(image_id, label)
+    )""")
+    con.commit(); con.close()
+
+def upsert_image(refdb_path: str, img_path: str, quality: str, sha256: str|None=None) -> int:
+    con = sqlite3.connect(refdb_path); cur = con.cursor()
+    cur.execute("SELECT id FROM images WHERE path=?", (img_path,))
+    row = cur.fetchone()
+    if row:
+        img_id = row[0]
+        cur.execute("UPDATE images SET quality=?, sha256=? WHERE id=?", (quality, sha256, img_id))
+    else:
+        cur.execute("INSERT INTO images(path,quality,sha256,created_at) VALUES(?,?,?,?)",
+                    (img_path, quality, sha256 or "", time.time()))
+        img_id = cur.lastrowid
+    con.commit(); con.close()
+    return img_id
+
+def upsert_labels(refdb_path: str, img_id: int, labels: list[str]):
+    con = sqlite3.connect(refdb_path); cur = con.cursor()
+    for lb in labels or []:
+        try:
+            cur.execute("INSERT OR IGNORE INTO image_labels(image_id,label) VALUES(?,?)",
+                        (img_id, lb.strip()))
+        except Exception:
+            pass
+    con.commit(); con.close()
