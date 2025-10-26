@@ -130,6 +130,13 @@ def cmd_analyze():
             print(f"[yellow]⚠ Pose-Qualität: Mittel (Score: {quality.get('pose_quality_score', 0):.2f})[/yellow]")
         
         angles = compute_angles_config(pose, cfg, use_3d=False)
+        
+        # Show perspective detection
+        perspective = angles.get("__perspective__", "unknown")
+        use_3d = angles.get("__use_3d__", False)
+        perspective_emoji = {"frontal": "📷", "lateral": "📐", "oblique": "📊"}.get(perspective, "❓")
+        angle_type = "3D" if use_3d else "2D"
+        print(f"[cyan]{perspective_emoji} Kamera-Perspektive: {perspective.upper()} → {angle_type}-Winkel[/cyan]")
     else:
         # Dummy path für analysis wenn kein Bild
         analysis = AnalysisInput(exercise=exercise, image_path="", external_load_kg=external_load)

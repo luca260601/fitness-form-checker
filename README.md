@@ -1,83 +1,130 @@
+# 🏋️ Fitness Form Checker - Professional Web Application
 
-# Fitness Form Assistant (Console / Python)
+Ein **professionelles KI-gestütztes System** zur Analyse von Trainingsformen mit Computer Vision und OpenAI. 
 
-Ein kleines, einsteigerfreundliches Projekt, das ein Foto deiner Übung (z. B. Squat oder Überkopfdrücken) einliest, deinen Körper mit **MediaPipe** erkennt, daraus einen **Positionsvektor** (Pose-Landmarks) und **Winkel** berechnet, eine grobe **Gelenkbelastung** schätzt und dir mit einem **OpenAI‑Modell** personalisiertes Feedback gibt. Zusätzlich werden **Diagramme** lokal mit Matplotlib gezeichnet.
+**Moderne Web-Oberfläche** für benutzerfreundliche Bewegungsanalyse.
 
-> ⚠️ **Hinweis**: Die Last-/Momenten-Schätzungen sind stark vereinfacht (statisch, 2D) und ersetzen **keine** professionelle Biomechanik, Diagnose oder Beratung. Nutze die Ergebnisse nur als grobe Orientierung.
+## ✨ Features
 
-## Schnellstart
+- **🎯 Moderne Web-UI**: Professionelle, responsive Benutzeroberfläche
+- **📷 Drag & Drop Upload**: Einfaches Hochladen von Trainingsbildern
+- **🤖 KI-Pose-Erkennung**: Automatische Körperhaltungs-Analyse mit MediaPipe
+- **📐 Winkel-Anzeige**: Verständliche Gelenkwinkel mit Erklärungen
+- **🧠 Intelligentes Feedback**: Personalisierte Verbesserungsvorschläge mit OpenAI
+- **🎨 Professionelle Visualisierung**: Saubere Analyse-Berichte ohne Redundanz
+- **🔄 Live-Analyse**: Sofortige Ergebnisse in der Web-Oberfläche
 
-1) **Python 3.11+** installieren.
-2) Projekt entpacken und Terminal ins Projekt wechseln:
-   ```bash
-   cd fitness_form_assistant
-   ```
-3) (Empfohlen) **virtuelle Umgebung** erstellen:
-   ```bash
-   python -m venv .venv
-   source .venv/bin/activate  # Windows: .venv\Scripts\activate
-   ```
-4) **Abhängigkeiten** installieren:
-   ```bash
-   pip install -r requirements.txt
-   ```
-5) OpenAI **API-Key** setzen (Account unter platform.openai.com).  
-   Kopiere `.env.example` nach `.env` und trage deinen Key ein **ODER** exportiere ihn direkt:
-   ```bash
-   export OPENAI_API_KEY=sk-...   # Windows PowerShell: $Env:OPENAI_API_KEY='sk-...'
-   ```
-6) Lege ein Testfoto in den Ordner `input/` (du kannst diesen Ordner selbst anlegen) oder gib später den Pfad an.
-7) **Starten**:
-   ```bash
-   python app.py
-   ```
+## 🚀 Schnellstart
 
-## Was passiert?
+### 1. Dependencies installieren
+```bash
+pip install -r requirements-web.txt
+```
 
-- Du gibst **Personendaten** (Gewicht, Größe, ggf. Stangen-/Zusatzgewicht) ein.
-- Du wählst **Übung** und **Bildpfad**.
-- `pose_tools.py` extrahiert mit **MediaPipe** einen **Vektor** aus 33 Körper-Landmarks und berechnet **Winkel** (Knie, Hüfte, Rücken, Schulter je nach Übung).
-- Es wird eine **grobe Momentenschätzung** (z. B. Knie/Hüfte) berechnet und als **Balkendiagramm** gespeichert (`output/diagram_*.png`).
-- Ein **OpenAI‑Modell** (Text) bekommt deine Winkel/Parameter und die eingebauten **Grundlagen-Notizen** (siehe `knowledge/*.md`) und erstellt präzises, freundliches **Form-Feedback**.
+### 3. Web-App starten
+```bash
+python start.py
+```
 
-## OpenAI Plattform – optionale Pro‑Features
+**Dann öffne:** http://localhost:8000
 
-Du wolltest **File Search**, **Code Interpreter** und **Systemanweisungen** – das MVP nutzt bereits **Systemanweisungen** (System-Prompt).  
-Für File Search & Code Interpreter findest du unten einen Erweiterungspfad (separat – bewusst optional, damit der Start einfach bleibt).
+## 🎯 Verwendung
 
-### Erweiterung A: File Search
+### Web-Interface (Empfohlen)
+1. **🌐 Browser öffnen:** http://localhost:8000
+2. **👤 Profil eingeben:** Name, Gewicht, Größe
+3. **🏋️ Übung wählen:** Aus Dropdown-Liste
+4. **📷 Bild hochladen:** Drag & Drop oder Klick
+5. **⚡ Analysieren:** Button klicken
+6. **📊 Ergebnisse ansehen:** Strukturierte Analyse
 
-- Ziel: Dem Modell zusätzliche Wissensdateien (z. B. `knowledge/`) über **Vector Stores** verfügbar machen.
-- Vorgehen (kurz):
-  1. Erstelle einen **Vector Store** und lade Dateien hoch.
-  2. Verbinde den Vector Store mit deinem Assistant oder deinen Requests.
-- Doku (offizielle OpenAI‑Seiten):
-  - Assistants **File Search**: https://platform.openai.com/docs/assistants/tools/file-search
-  - Quickstart / SDK: https://platform.openai.com/docs/quickstart/build-your-application
-  - Migrationshinweis zu **Responses API**: https://platform.openai.com/docs/assistants/migration
+### Kommandozeile (Legacy)
+```bash
+python app.py --profile "Max" --exercise "Squats" --image "squat.jpg"
+```
 
-> In diesem Starter ist File Search noch nicht aktiv, weil es für Einsteiger mehr Schritte (Vector Store, Upload, IDs) bedeutet. Du kannst es später leicht nachrüsten (siehe Kommentare in `app.py`).
+## 🏋️ Unterstützte Übungen
 
-### Erweiterung B: Code Interpreter
+| Übung | Deutsche Bezeichnung | Analyse-Typ |
+|-------|---------------------|-------------|
+| **Squats** | Kniebeugen | Bilateral (beide Beine) |
+| **Lunges** | Ausfallschritte | Unilateral (Front/Rear) |
+| **Bizepscurls** | Bizeps-Training | Armwinkel-Analyse |
+| **Lattziehen** | Rückentraining | Rumpf + Arme |
 
-- Ziel: Diagramme **serverseitig** im OpenAI Code Interpreter erzeugen (statt lokal in Matplotlib).
-- Doku:
-  - Tools/Agents Überblick: https://platform.openai.com/docs/guides/agents-sdk
-  - Changelog-Hinweis (Responses unterstützt Bild-/Datei-Outputs): https://platform.openai.com/docs/changelog/may-13th-2024
+## 📊 Was du bekommst
 
-> In diesem Starter werden Charts lokal erzeugt. Für Einsteiger ist das robuster und planbar. Später kannst du auf den Code Interpreter umstellen (Beispiel-Snippets sind in `app.py` kommentiert).
+### **🎨 Professionelle Web-UI:**
+- **Winkel-Namen** mit Erklärungen
+- **Farb-Kodierung** (Grün/Gelb/Rot) für sofortige Bewertung
+- **Strukturiertes KI-Feedback** in Kategorien
+- **Saubere Visualisierung** ohne redundante Panels
 
-## Eingebaute Wissens-Notizen
+### **📐 Intelligente Winkel-Analyse:**
+```
+🦵 Vorderes Knie          88.0°
+   Beugung des vorderen Beins
 
-- `knowledge/squat_basics.md`: Technikgrundlagen, Sicherheits- und Coaching-Hinweise für Kniebeuge.
-- `knowledge/overhead_press_basics.md`: Kurznotizen fürs Überkopfdrücken.
+🏃 Hüftwinkel            132.6°
+   Öffnung der Hüfte
 
-Diese Texte werden aktuell **lokal in den Prompt** gegeben. Mit File Search kannst du sie künftig als Retrieval-Wissen anbinden.
+🏋️ Rumpfneigung           0.6°
+   Neigung des Oberkörpers
+```
 
-## Typische Stolpersteine
+### **🤖 KI-Feedback-Kategorien:**
+- 🟢 **Was gut ist** - Positive Aspekte
+- 🟠 **Verbesserungsmöglichkeiten** - Optimierungspotential  
+- 🔵 **Konkrete Tipps** - Handlungsempfehlungen
 
-- **Pose wird nicht erkannt** → Bild ausreichend groß/hell? Person im Vollkörper sichtbar? Probier ein anderes Foto.
-- **OpenAI‑Key fehlt** → `.env` korrekt? Oder Umgebungsvariable gesetzt?
-- **MediaPipe Build**: Falls Installation auf deinem System zickt, versuche eine aktuelle Python‑Version und ein frisches virtuelles Environment.
+## 🛠️ Technische Details
 
-Viel Spaß – und sag Bescheid, wenn du die Pro‑Features einschalten willst. :)
+- **Frontend**: HTML5 + TailwindCSS + Lucide Icons
+- **Backend**: FastAPI + Python 3.8+
+- **Computer Vision**: MediaPipe für Pose-Erkennung
+- **KI-Analyse**: OpenAI GPT-4 für Feedback
+- **Visualisierung**: Matplotlib (optimiert)
+
+## 📁 Projektstruktur
+
+```
+fitness-form-checker/
+├── start.py              # 🚀 Haupt-Startdatei
+├── improved_web.py       # 🌐 Web-Anwendung
+├── pose_service/         # 🎯 Pose-Analyse
+├── utils/               # 🔧 Hilfsfunktionen  
+├── knowledge/           # 📚 Übungs-Wissen
+├── data/               # ⚙️ Konfigurationen
+└── output/             # 📊 Ergebnisse
+```
+
+## 🔧 Systemanforderungen
+
+- **Python**: 3.8 oder höher
+- **RAM**: Mindestens 4GB
+- **OpenAI API**: Gültiger Schlüssel erforderlich
+- **Browser**: Chrome, Firefox, Safari, Edge
+
+## 💡 Tipps für beste Ergebnisse
+
+### **📸 Foto-Qualität:**
+- **Ganzer Körper sichtbar** von Kopf bis Füße
+- **Gute Beleuchtung** ohne starke Schatten
+- **Klarer Hintergrund** für bessere Erkennung
+
+### **📐 Kamera-Perspektive:**
+- **Seitlich**: Für Squats, Deadlifts, Lunges
+- **Frontal**: Für Bizepscurls, Overhead Press
+- **Augenhöhe**: Kamera auf Hüfthöhe positionieren
+
+## 🎉 Entwickelt für Professionalität
+
+Diese Web-Anwendung wurde speziell entwickelt für:
+- **Fitness-Trainer** - Kunden-Analyse
+- **Physiotherapeuten** - Bewegungsanalyse  
+- **Sportler** - Technik-Optimierung
+- **Fitness-Enthusiasten** - Selbst-Coaching
+
+---
+
+**🚀 Starte jetzt mit `python start.py` und erlebe professionelle Bewegungsanalyse!**

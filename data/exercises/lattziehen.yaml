@@ -17,22 +17,32 @@ angles:
 - id: rueckenwinkel
   label: Rückenwinkel
   points:
-  - vertical
-  - left_hip
   - left_shoulder
+  - left_hip
+  - vertical_down
 - id: hueftwinkel
   label: Hüftwinkel
   points:
   - left_knee
   - left_hip
   - left_shoulder
+- id: trunk_lean
+  label: Trunk Lean
+  points:
+  - left_shoulder
+  - left_hip
+  - vertical_reference
 segments:
 - - shoulder
   - elbow
 - - elbow
   - wrist
+- - shoulder
+  - hip
 - - hip
   - knee
+- - knee
+  - ankle
 empirical:
   means: {}
 knowledge_ref: knowledge/lattziehen.md

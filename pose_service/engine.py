@@ -69,6 +69,44 @@ def get_pose_vector(image_path: str,
     return out
 
 # ---- Hilfen (exportiert, weil Visualization sie importiert) ----
+def _detect_camera_perspective(landmarks: List[Dict]) -> str:
+    """
+    Erkennt Kamera-Perspektive automatisch:
+    - 'frontal': Person schaut in Kamera (beide Schultern sichtbar, Z-Diff klein)
+    - 'lateral': Seitenansicht (eine Schulter verdeckt, Z-Diff groß)
+    - 'oblique': Schräge Ansicht (mittlere Z-Differenz)
+    
+    Returns: 'frontal', 'lateral', oder 'oblique'
+    """
+    try:
+        l_shoulder = landmarks[LMS["LEFT_SHOULDER"]]
+        r_shoulder = landmarks[LMS["RIGHT_SHOULDER"]]
+        
+        # Z-Koordinaten-Differenz (Tiefe)
+        z_diff = abs(l_shoulder["z"] - r_shoulder["z"])
+        
+        # Sichtbarkeit beider Schultern
+        l_vis = l_shoulder["visibility"]
+        r_vis = r_shoulder["visibility"]
+        
+        # X-Position Differenz (horizontal)
+        x_diff = abs(l_shoulder["x"] - r_shoulder["x"])
+        
+        # FRONTAL: Beide Schultern gut sichtbar, kleine Z-Diff, große X-Diff
+        if l_vis > 0.7 and r_vis > 0.7 and z_diff < 0.15 and x_diff > 0.15:
+            return "frontal"
+        
+        # LATERAL: Eine Schulter verdeckt ODER große Z-Diff
+        elif (l_vis < 0.5 or r_vis < 0.5) or z_diff > 0.3:
+            return "lateral"
+        
+        # OBLIQUE: Alles dazwischen
+        else:
+            return "oblique"
+            
+    except Exception:
+        return "frontal"  # Fallback
+
 def _detect_exercise_type(landmarks: List[Dict]) -> str:
     """
     Erkennt Übungstyp basierend auf Beinstellung:
@@ -151,28 +189,122 @@ def _resolve_xy_any(pose: Dict[str, Any], default_side: str, token: str) -> Opti
     return _get_enhanced_xy(pose, default_side, t)
 
 def _angle_2d(p1: np.ndarray, p2: np.ndarray, p3: np.ndarray) -> float:
+    """Berechnet 2D-Winkel zwischen 3 Punkten."""
     v1 = p1 - p2; v2 = p3 - p2
     n1 = np.linalg.norm(v1); n2 = np.linalg.norm(v2)
     if n1 == 0 or n2 == 0: return 0.0
     c = np.clip(np.dot(v1/n1, v2/n2), -1.0, 1.0)
     return float(np.degrees(np.arccos(c)))
 
+def _angle_3d(p1: np.ndarray, p2: np.ndarray, p3: np.ndarray) -> float:
+    """
+    Berechnet 3D-Winkel zwischen 3 Punkten.
+    Nutzt X, Y, Z Koordinaten für echte räumliche Winkel.
+    """
+    v1 = p1 - p2
+    v2 = p3 - p2
+    
+    n1 = np.linalg.norm(v1)
+    n2 = np.linalg.norm(v2)
+    
+    if n1 == 0 or n2 == 0:
+        return 0.0
+    
+    # Dot product und Winkel
+    cos_angle = np.clip(np.dot(v1, v2) / (n1 * n2), -1.0, 1.0)
+    angle = np.arccos(cos_angle)
+    
+    return float(np.degrees(angle))
+
+def _get_3d_point(pose: Dict[str, Any], side: str, joint: str) -> np.ndarray:
+    """Holt 3D-Koordinaten (x, y, z) für ein Gelenk."""
+    idx = LMS.get(f"{side}_{joint.upper()}")
+    if idx is None:
+        raise ValueError(f"Joint {side}_{joint} unbekannt")
+    lm = pose["landmarks"][idx]
+    return np.array([float(lm["x"]), float(lm["y"]), float(lm["z"])])
+
+def _calculate_trunk_lean_frontal(pose: Dict[str, Any], side: str) -> float:
+    """
+    Berechnet Rückenneigung bei frontaler Ansicht für Lattziehen.
+    
+    NEUE METHODE: Nutzt Kopf-Position als Referenz
+    Bei Lattziehen: Kopf ist meist nach hinten geneigt
+    
+    Returns: Winkel in Grad (positiv = Rückwärts, negativ = Vorwärts)
+    """
+    try:
+        # Versuche verschiedene Ansätze
+        
+        # Ansatz 1: Kopf-Schulter-Hüfte Linie
+        try:
+            # Nutze Nase als Kopf-Referenz
+            nose_idx = 0  # MediaPipe Nose landmark
+            nose = pose["landmarks"][nose_idx]
+            
+            shoulder_3d = _get_3d_point(pose, side, "shoulder")
+            hip_3d = _get_3d_point(pose, side, "hip")
+            
+            # Berechne Neigung über Kopf-Position
+            nose_x = nose["x"]
+            shoulder_x = shoulder_3d[0]
+            hip_x = hip_3d[0]
+            
+            # Bei Rückwärtsneigung: Kopf weiter hinten als Hüfte
+            head_lean = (nose_x - hip_x) * 100  # Verstärke Signal
+            
+            # Schätze Rückenwinkel basierend auf Kopfposition
+            if head_lean > 0.02:  # Kopf deutlich hinter Hüfte
+                return 15.0  # Typisch für Lattziehen
+            elif head_lean > 0.01:
+                return 8.0   # Leichte Rückneigung
+            else:
+                return 3.0   # Fast aufrecht
+                
+        except Exception:
+            pass
+        
+        # Ansatz 2: Z-Koordinaten (Fallback)
+        shoulder_3d = _get_3d_point(pose, side, "shoulder")
+        hip_3d = _get_3d_point(pose, side, "hip")
+        
+        z_diff = shoulder_3d[2] - hip_3d[2]
+        y_diff = hip_3d[1] - shoulder_3d[1]
+        
+        if y_diff <= 0:
+            return 12.0  # Fallback für Lattziehen
+        
+        # Verstärke Z-Signal für bessere Erkennung
+        angle_rad = np.arctan(z_diff * 3 / y_diff)  # Faktor 3 für Verstärkung
+        angle_deg = np.degrees(angle_rad)
+        
+        # Begrenze auf realistische Werte für Lattziehen
+        return float(np.clip(angle_deg, -5.0, 25.0))
+        
+    except Exception as e:
+        print(f"Trunk lean calculation failed: {e}")
+        return 12.0  # Fallback: Typischer Lattziehen-Winkel
+
 def compute_angles_config(pose: Dict[str, Any], cfg: Dict[str, Any], use_3d: bool=False) -> Dict[str, float]:
     """
     Berechnet alle in cfg['angles'] definierten Winkel.
     
-    WICHTIG: Erkennt automatisch Übungstyp:
-    - Bilateral (Squat): Nutzt beste Körperseite (left/right)
-    - Unilateral (Lunges): Nutzt front/rear basierend auf X-Position
+    NEU: Automatische Perspektiv-Erkennung!
+    - Erkennt ob frontal/lateral/oblique
+    - Nutzt 3D-Winkel bei frontaler Ansicht
+    - Nutzt 2D-Winkel bei seitlicher Ansicht
     
-    Returns: Dict mit Keys "<angle_id>_deg" und "__side__" / "__exercise_type__"
+    Returns: Dict mit Keys "<angle_id>_deg" und "__side__" / "__exercise_type__" / "__perspective__"
     """
     if not pose or "angles" not in cfg: return {}
     
-    # 1) Übungstyp erkennen
+    # 1) Perspektive erkennen
+    perspective = _detect_camera_perspective(pose["landmarks"])
+    
+    # 2) Übungstyp erkennen
     exercise_type = _detect_exercise_type(pose["landmarks"])
     
-    # 2) Seite wählen (nur für bilaterale Übungen relevant)
+    # 3) Seite wählen (nur für bilaterale Übungen relevant)
     if exercise_type == "bilateral":
         side = _choose_optimal_side(pose["landmarks"], ["shoulder","hip","knee","ankle"])
     else:
@@ -180,9 +312,16 @@ def compute_angles_config(pose: Dict[str, Any], cfg: Dict[str, Any], use_3d: boo
         # Aber für Schulter/Oberkörper nutzen wir trotzdem die beste Seite
         side = _choose_optimal_side(pose["landmarks"], ["shoulder","hip"])
     
+    # 4) Entscheide: 3D oder 2D Winkel?
+    # Bei frontaler Ansicht: 3D-Winkel nutzen (weil 2D-Projektion verzerrt ist)
+    # Bei seitlicher Ansicht: 2D-Winkel nutzen (optimal für Biomechanik)
+    use_3d_angles = (perspective == "frontal") or use_3d
+    
     out = {
         "__side__": side,
-        "__exercise_type__": exercise_type
+        "__exercise_type__": exercise_type,
+        "__perspective__": perspective,
+        "__use_3d__": use_3d_angles
     }
     
     # 3) Alle Winkel berechnen
@@ -205,27 +344,71 @@ def compute_angles_config(pose: Dict[str, Any], cfg: Dict[str, Any], use_3d: boo
                 out[f"{aid}_deg"] = ang
             else:
                 # Standard 3-Punkt-Winkel
-                p1 = _resolve_xy_any(pose, side, pts[0])
-                p2 = _resolve_xy_any(pose, side, pts[1])
-                p3 = _resolve_xy_any(pose, side, pts[2])
-                ang = _angle_2d(p1, p2, p3)
+                if use_3d_angles:
+                    # 3D-Winkel für frontale Ansicht
+                    try:
+                        # Versuche 3D-Punkte zu holen
+                        p1_3d = _get_3d_point(pose, side, pts[0]) if not pts[0].startswith(("front_", "rear_")) else None
+                        p2_3d = _get_3d_point(pose, side, pts[1]) if not pts[1].startswith(("front_", "rear_")) else None
+                        p3_3d = _get_3d_point(pose, side, pts[2]) if not pts[2].startswith(("front_", "rear_")) else None
+                        
+                        if p1_3d is not None and p2_3d is not None and p3_3d is not None:
+                            ang = _angle_3d(p1_3d, p2_3d, p3_3d)
+                        else:
+                            # Fallback auf 2D
+                            p1 = _resolve_xy_any(pose, side, pts[0])
+                            p2 = _resolve_xy_any(pose, side, pts[1])
+                            p3 = _resolve_xy_any(pose, side, pts[2])
+                            ang = _angle_2d(p1, p2, p3)
+                    except:
+                        # Fallback auf 2D
+                        p1 = _resolve_xy_any(pose, side, pts[0])
+                        p2 = _resolve_xy_any(pose, side, pts[1])
+                        p3 = _resolve_xy_any(pose, side, pts[2])
+                        ang = _angle_2d(p1, p2, p3)
+                else:
+                    # 2D-Winkel für seitliche Ansicht
+                    p1 = _resolve_xy_any(pose, side, pts[0])
+                    p2 = _resolve_xy_any(pose, side, pts[1])
+                    p3 = _resolve_xy_any(pose, side, pts[2])
+                    ang = _angle_2d(p1, p2, p3)
+                
                 out[f"{aid}_deg"] = float(ang)
         except Exception as e:
             print(f"Warning: Could not compute angle {a.get('id')}: {e}")
             out[f"{a.get('id')}_deg"] = 0.0
     
-    # 4) Zusatzwinkel: Trunk Inclination (nur wenn nicht schon vorhanden)
+    # 4) Intelligente Trunk Inclination basierend auf Perspektive
     if "trunk_deg" not in out and "trunk_inclination_deg" not in out:
         try:
-            shoulder = _get_enhanced_xy(pose, side, "shoulder")
-            hip = _get_enhanced_xy(pose, side, "hip")
-            vertical = np.array([0.0, -1.0])
-            trunk = shoulder - hip
-            nu = np.linalg.norm(vertical); nv = np.linalg.norm(trunk)
-            if nu>0 and nv>0:
-                c = np.clip(np.dot(vertical/nu, trunk/nv), -1.0, 1.0)
-                out["trunk_inclination_deg"] = float(np.degrees(np.arccos(c)))
-        except Exception:
+            if perspective == "frontal":
+                # Bei frontaler Ansicht: Warnung + Schätzung
+                print(f"[yellow]⚠ Frontale Ansicht: Rückenwinkel kann nicht präzise gemessen werden[/yellow]")
+                print(f"[dim]Empfehlung: Foto von der Seite für genaue Rückenanalyse[/dim]")
+                
+                # Schätze typischen Lattziehen-Winkel
+                exercise_name = cfg.get("name", "").lower()
+                if "latt" in exercise_name or "pull" in exercise_name:
+                    estimated_angle = 12.0  # Typisch für Lattziehen
+                    out["trunk_inclination_deg"] = estimated_angle
+                    out["__trunk_estimated__"] = True
+                    print(f"[cyan]📊 Geschätzter Rückenwinkel: {estimated_angle}° (typisch für Lattziehen)[/cyan]")
+                else:
+                    out["trunk_inclination_deg"] = 5.0  # Konservative Schätzung
+                    out["__trunk_estimated__"] = True
+            else:
+                # Bei seitlicher Ansicht: Präzise 2D-Berechnung
+                shoulder = _get_enhanced_xy(pose, side, "shoulder")
+                hip = _get_enhanced_xy(pose, side, "hip")
+                vertical = np.array([0.0, -1.0])
+                trunk = shoulder - hip
+                nu = np.linalg.norm(vertical); nv = np.linalg.norm(trunk)
+                if nu>0 and nv>0:
+                    c = np.clip(np.dot(vertical/nu, trunk/nv), -1.0, 1.0)
+                    out["trunk_inclination_deg"] = float(np.degrees(np.arccos(c)))
+                    out["__trunk_estimated__"] = False
+        except Exception as e:
+            print(f"Trunk inclination calculation failed: {e}")
             pass
     
     return out

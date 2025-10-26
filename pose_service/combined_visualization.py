@@ -30,23 +30,16 @@ def create_combined_analysis_image(
     if img is None:
         raise FileNotFoundError(f"Could not load image: {image_path}")
 
-    fig = plt.figure(figsize=(20, 14), facecolor=COLORS['background'], dpi=300)
-    gs = fig.add_gridspec(3, 4, height_ratios=[2.5,2.5,1.2], width_ratios=[1.2,1.2,1,1],
-                          hspace=0.2, wspace=0.15, left=0.05, right=0.95, top=0.88, bottom=0.08)
+    # Simplified layout: Only main image and vector diagram (no bottom panels)
+    fig = plt.figure(figsize=(16, 10), facecolor=COLORS['background'], dpi=300)
+    gs = fig.add_gridspec(1, 2, width_ratios=[1.2, 1], 
+                          hspace=0.1, wspace=0.15, left=0.05, right=0.95, top=0.92, bottom=0.08)
 
-    ax_original = fig.add_subplot(gs[0:2, 0:2])
-    ax_vector = fig.add_subplot(gs[0:2, 2:4])
-    ax_angles  = fig.add_subplot(gs[2, 0])
-    ax_quick   = fig.add_subplot(gs[2, 1])
-    ax_quality = fig.add_subplot(gs[2, 2])
-    ax_info    = fig.add_subplot(gs[2, 3])
+    ax_original = fig.add_subplot(gs[0, 0])
+    ax_vector = fig.add_subplot(gs[0, 1])
 
     _draw_original_with_overlay(ax_original, img, pose, cfg)
     _draw_vector_body_diagram(ax_vector, pose, cfg, angles)
-    _draw_angles_panel(ax_angles, angles)
-    _draw_quick_panel(ax_quick, feedback_text)
-    _draw_quality_panel(ax_quality, pose)
-    _draw_info_panel(ax_info, profile_data)
 
     fig.suptitle('Fitness Form Analysis - Professional Report', fontsize=24, fontweight='bold',
                  color=COLORS['text'], y=0.97, ha='center')
@@ -155,15 +148,15 @@ def _add_pose_overlay_to_image(img, pose):
             (f"{side}_elbow", f"{side}_wrist"),
         ]
     
-    # Zeichne Linien
+    # Zeichne Linien (dünner)
     for a, b in connections:
         if a in joints and b in joints:
-            cv2.line(img, joints[a], joints[b], (30, 58, 138), 6, cv2.LINE_AA)
+            cv2.line(img, joints[a], joints[b], (30, 58, 138), 3, cv2.LINE_AA)
     
-    # Zeichne Gelenke
+    # Zeichne Gelenke (kleiner und dezenter)
     for pos in joints.values():
-        cv2.circle(img, pos, 10, (220, 38, 38), -1, cv2.LINE_AA)
-        cv2.circle(img, pos, 14, (255, 255, 255), 2, cv2.LINE_AA)
+        cv2.circle(img, pos, 4, (220, 38, 38), -1, cv2.LINE_AA)  # Innerer Kreis kleiner
+        cv2.circle(img, pos, 6, (255, 255, 255), 2, cv2.LINE_AA)  # Äußerer Kreis kleiner
     
     return img
 
@@ -180,6 +173,7 @@ def _draw_vector_body_diagram(ax, pose, cfg, angles):
     """
     side = angles.get("__side__", "LEFT")
     exercise_type = angles.get("__exercise_type__", "bilateral")
+    perspective = angles.get("__perspective__", "frontal")
     segs = cfg.get("segments", [])
     
     # HILFSFUNKTION: Löse generic/spezifische Segmente auf
@@ -228,6 +222,28 @@ def _draw_vector_body_diagram(ax, pose, cfg, angles):
         ax.text(0.5, 0.5, "No pose data", ha="center", va="center", transform=ax.transAxes)
         ax.axis('off')
         return
+    
+    # SPEZIAL: Bei frontaler Ansicht künstlich spreizen für bessere Darstellung
+    if perspective == "frontal":
+        # Künstliche X-Spreizung für bessere Visualisierung
+        P = np.vstack(pts).astype(float)
+        
+        # Erkenne Rückenneigung aus Angles
+        trunk_lean = angles.get("trunk_inclination_deg", 0)
+        
+        # Simuliere seitliche Ansicht basierend auf Rückenneigung
+        for i, (pt_a, pt_b, name_a, name_b) in enumerate(resolved_segs):
+            if "shoulder" in name_a and "hip" in name_b:
+                # Rumpf-Segment: Neige basierend auf trunk_lean
+                lean_factor = trunk_lean / 90.0  # Normalisiere auf 0-1
+                pt_a_new = pt_a.copy()
+                pt_a_new[0] += lean_factor * 0.1  # Schulter nach rechts
+                pts[i*2] = pt_a_new
+            elif "hip" in name_a and "knee" in name_b:
+                # Oberschenkel: Leicht nach links
+                pt_b_new = pt_b.copy()
+                pt_b_new[0] -= 0.05  # Knie nach links
+                pts[i*2+1] = pt_b_new
     
     # Auto-Scaling: Zentriere und normalisiere
     P = np.vstack(pts).astype(float)
@@ -307,9 +323,15 @@ def _draw_angles_panel(ax, angles: Dict[str, Any]):
         for name,val in data[:6]:
             ax.add_patch(patches.Rectangle((0.02,y-0.06),0.96,0.12,fc='white',ec=COLORS['border'],alpha=0.5,transform=ax.transAxes))
             ax.text(0.05,y,f"{name}:", transform=ax.transAxes, fontsize=10, color=COLORS['text'], fontweight='bold')
-            ax.text(0.95,y,f"{val:.1f}", ha='right', transform=ax.transAxes, fontsize=10, color=COLORS['accent'])
+            
+            # Zeige Schätzung für Trunk-Winkel an
+            if "trunk" in name.lower() and angles.get("__trunk_estimated__", False):
+                ax.text(0.95,y,f"~{val:.1f}°", ha='right', transform=ax.transAxes, fontsize=10, 
+                       color=COLORS['warning'], fontweight='bold')
+            else:
+                ax.text(0.95,y,f"{val:.1f}°", ha='right', transform=ax.transAxes, fontsize=10, color=COLORS['accent'])
             y-=0.16
-    ax.set_title('ðŸ“ Joint Angles', fontsize=14, fontweight='bold', color=COLORS['text'], pad=15)
+    ax.set_title('Joint Angles', fontsize=14, fontweight='bold', color=COLORS['text'], pad=15)
     ax.set_xlim(0,1); ax.set_ylim(0,1); ax.axis('off')
 
 def _draw_quick_panel(ax, feedback_text: str):
@@ -354,7 +376,7 @@ def _draw_quality_panel(ax, pose: Dict[str,Any]):
     ax.text(0.5,0.65,text,ha='center',va='center',transform=ax.transAxes,fontsize=12,fontweight='bold',color=color)
     ax.text(0.5,0.35,f"Quality Score: {score:.3f}",ha='center',va='center',transform=ax.transAxes,fontsize=10,color=COLORS['text'])
     ax.text(0.5,0.2,f"Visibility: {avg:.3f}",ha='center',va='center',transform=ax.transAxes,fontsize=10,color=COLORS['text'])
-    ax.set_title('ðŸŽ¯ Pose Quality', fontsize=14, fontweight='bold', color=COLORS['text'], pad=15)
+    ax.set_title('Pose Quality', fontsize=14, fontweight='bold', color=COLORS['text'], pad=15)
     ax.set_xlim(0,1); ax.set_ylim(0,1); ax.axis('off')
 
 def _draw_info_panel(ax, profile_data: Dict[str,Any]):
@@ -370,7 +392,7 @@ def _draw_info_panel(ax, profile_data: Dict[str,Any]):
         ax.text(0.05,y,k,transform=ax.transAxes,fontsize=10,color=COLORS['text'],fontweight='bold')
         ax.text(0.95,y,str(v),ha='right',transform=ax.transAxes,fontsize=10,color=COLORS['accent'])
         y-=0.18
-    ax.set_title('ðŸ‘¥ Profile Info', fontsize=14, fontweight='bold', color=COLORS['text'], pad=15)
+    ax.set_title('Profile Info', fontsize=14, fontweight='bold', color=COLORS['text'], pad=15)
     ax.set_xlim(0,1); ax.set_ylim(0,1); ax.axis('off')
 
 def _place_panel_titles(fig, ax_left, ax_right, y=0.895):
@@ -436,7 +458,7 @@ def _draw_moments_panel(ax, feedback_text: str):
                     transform=ax.transAxes, wrap=True)
             y -= 0.20
 
-    ax.set_title('ðŸ“‹ Quick Assessment', fontsize=14, fontweight='bold',
+    ax.set_title('Quick Assessment', fontsize=14, fontweight='bold',
                  color=COLORS['text'], pad=15)
     ax.set_xlim(0, 1)
     ax.set_ylim(0, 1)
