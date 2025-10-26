@@ -1,0 +1,21 @@
+angles:
+- id: front_knee_angle
+  points:
+  - front_hip
+  - front_knee
+  - front_ankle
+- id: rear_knee_angle
+  points:
+  - rear_hip
+  - rear_knee
+  - rear_ankle
+- id: hip_angle
+  points:
+  - front_knee
+  - front_hip
+  - rear_hip
+- id: trunk_inclination
+  points:
+  - vertical
+  - front_hip
+  - left_shoulder

@@ -1,0 +1,73 @@
+name: Ausfallschritte
+aliases:
+- Ausfallschritte
+angles:
+- id: front_knee_angle
+  label: Vorderes Knie
+  points:
+  - front_hip
+  - front_knee
+  - front_ankle
+- id: rear_knee_angle
+  label: Hinteres Knie
+  points:
+  - rear_hip
+  - rear_knee
+  - rear_ankle
+- id: hip_angle
+  label: Hüftwinkel
+  points:
+  - front_knee
+  - front_hip
+  - rear_hip
+- id: trunk_inclination
+  label: Rumpfneigung
+  points:
+  - vertical
+  - front_hip
+  - left_shoulder
+segments:
+- - hip
+  - knee
+- - knee
+  - ankle
+- - shoulder
+  - hip
+empirical:
+  means: {}
+knowledge_ref: knowledge/ausfallschritte.md
+meta:
+  pictures_dir: pictures/Ausfallschritte
+  joints_seen:
+  - front_ankle
+  - front_foot_index
+  - front_heel
+  - front_hip
+  - front_knee
+  - left_ankle
+  - left_ear
+  - left_elbow
+  - left_eye
+  - left_foot_index
+  - left_heel
+  - left_hip
+  - left_knee
+  - left_shoulder
+  - left_wrist
+  - nose
+  - rear_ankle
+  - rear_foot_index
+  - rear_heel
+  - rear_hip
+  - rear_knee
+  - right_ankle
+  - right_ear
+  - right_elbow
+  - right_eye
+  - right_foot_index
+  - right_heel
+  - right_hip
+  - right_knee
+  - right_shoulder
+  - right_wrist
+  source_pdf_path: /Users/andrejegli/Documents/Schule/OST/Semester3/AI_Foundation/projekt/Ausfallschritte2.pdf

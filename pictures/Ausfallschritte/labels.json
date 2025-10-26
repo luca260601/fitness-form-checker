@@ -1,0 +1,15 @@
+{
+  "images": {
+    "good/Schritt2.png": {
+      "quality": "good",
+      "labels": [
+        "guter stand",
+        "körperspannung"
+      ]
+    },
+    "good/Schritt3.jpg": {
+      "quality": "good",
+      "labels": []
+    }
+  }
+}

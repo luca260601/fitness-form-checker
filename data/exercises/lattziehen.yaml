@@ -1,0 +1,83 @@
+name: Lattziehen
+aliases:
+- Lattziehen
+angles:
+- id: armwinkel_links
+  label: Armwinkel Links
+  points:
+  - left_shoulder
+  - left_elbow
+  - left_wrist
+- id: armwinkel_rechts
+  label: Armwinkel Rechts
+  points:
+  - right_shoulder
+  - right_elbow
+  - right_wrist
+- id: rueckenwinkel
+  label: Rückenwinkel
+  points:
+  - left_shoulder
+  - left_hip
+  - vertical_down
+- id: hueftwinkel
+  label: Hüftwinkel
+  points:
+  - left_knee
+  - left_hip
+  - left_shoulder
+- id: trunk_lean
+  label: Trunk Lean
+  points:
+  - left_shoulder
+  - left_hip
+  - vertical_reference
+segments:
+- - shoulder
+  - elbow
+- - elbow
+  - wrist
+- - shoulder
+  - hip
+- - hip
+  - knee
+- - knee
+  - ankle
+empirical:
+  means: {}
+knowledge_ref: knowledge/lattziehen.md
+meta:
+  pictures_dir: pictures/Lattziehen
+  joints_seen:
+  - front_ankle
+  - front_foot_index
+  - front_heel
+  - front_hip
+  - front_knee
+  - left_ankle
+  - left_ear
+  - left_elbow
+  - left_eye
+  - left_foot_index
+  - left_heel
+  - left_hip
+  - left_knee
+  - left_shoulder
+  - left_wrist
+  - nose
+  - rear_ankle
+  - rear_foot_index
+  - rear_heel
+  - rear_hip
+  - rear_knee
+  - right_ankle
+  - right_ear
+  - right_elbow
+  - right_eye
+  - right_foot_index
+  - right_heel
+  - right_hip
+  - right_knee
+  - right_shoulder
+  - right_wrist
+  source_pdf_path: /Users/andrejegli/Documents/Schule/OST/Semester3/AI_Foundation/projekt/latt.pdf

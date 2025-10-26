@@ -1,7 +1,0 @@
-pycryptodome==3.23.0
-setuptools==78.1.1
-wheel==0.45.1
-PyPDF2
-pdf2image
-pytesseract
-Pillow
