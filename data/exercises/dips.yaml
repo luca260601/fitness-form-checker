@@ -1,43 +1,47 @@
-name: Ausfallschritte
+name: Dips
 aliases:
-- Ausfallschritte
+- Dips
 angles:
-- id: vorderes_knie
-  label: Vorderes Knie
+- id: elbow_angle
+  label: Ellenbogenwinkel
+  points:
+  - left_shoulder
+  - left_elbow
+  - left_wrist
+- id: shoulder_angle
+  label: Schulterwinkel
   points:
   - vertical
-  - front_knee
-  - front_ankle
-- id: hinteres_knie
-  label: Hinteres Knie
-  points:
-  - rear_hip
-  - rear_knee
-  - rear_ankle
-- id: hueftwinkel
+  - left_shoulder
+  - left_elbow
+- id: hip_angle
   label: Hüftwinkel
   points:
-  - front_knee
-  - front_hip
-  - rear_hip
-- id: rumpfneigung
-  label: Rumpfneigung
-  points:
-  - vertical
-  - front_hip
   - left_shoulder
+  - left_hip
+  - left_knee
+- id: knee_angle
+  label: Kniebeugung
+  points:
+  - left_hip
+  - left_knee
+  - left_ankle
 segments:
+- - shoulder
+  - elbow
+- - elbow
+  - wrist
+- - shoulder
+  - hip
 - - hip
   - knee
 - - knee
   - ankle
-- - shoulder
-  - hip
 empirical:
   means: {}
-knowledge_ref: knowledge/ausfallschritte.md
+knowledge_ref: knowledge/dips.md
 meta:
-  pictures_dir: pictures/Ausfallschritte
+  pictures_dir: pictures/Dips
   joints_seen:
   - front_ankle
   - front_foot_index
@@ -70,4 +74,4 @@ meta:
   - right_knee
   - right_shoulder
   - right_wrist
-  source_pdf_path: /Users/andrejegli/Documents/Schule/OST/Semester3/AI_Foundation/projekt/Ausfallschritte2.pdf
+  source_pdf_path: /Users/andrejegli/Documents/Schule/OST/Semester3/AI_Foundation/projekt/Dips.pdf

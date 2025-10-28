@@ -1,0 +1,20 @@
+{
+  "images": {
+    "good/dips.jpg": {
+      "quality": "good",
+      "labels": [
+        "seitlich",
+        "guter winkel",
+        "stolze halung"
+      ]
+    },
+    "good/dips_1.jpg": {
+      "quality": "good",
+      "labels": []
+    },
+    "good/dips11.jpg": {
+      "quality": "good",
+      "labels": []
+    }
+  }
+}

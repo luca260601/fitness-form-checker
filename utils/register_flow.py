@@ -86,7 +86,7 @@ def ensure_keypoints_for_dir(good_dir: Path) -> Tuple[int,int]:
     for img in sorted(good_dir.glob("*")):
         ext = img.suffix.lower()
         if ext not in SUPPORTED_IMAGE_EXTS:
-            print(f"âš  Format nicht unterstÃ¼tzt ({ext}): {img.name}")
+            print(f"Format nicht unterstützt ({ext}): {img.name}")
             continue
         out = img.with_suffix(img.suffix + ".keypoints.json")
         if out.exists(): continue
@@ -102,7 +102,7 @@ def ensure_keypoints_for_dir(good_dir: Path) -> Tuple[int,int]:
             except Exception:
                 pass
         if not success:
-            print(f"Keypoints fehlgeschlagen fÃ¼r {img.name}: Keine Pose erkannt.", file=sys.stderr)
+            print(f"Keypoints fehlgeschlagen für {img.name}: Keine Pose erkannt.", file=sys.stderr)
             fail+=1
     return ok, fail
 
@@ -407,7 +407,7 @@ def register_exercise_interactive(base_dir: str = "."):
         if not p: break
         src = Path(p).expanduser().resolve()
         if not src.exists():
-            print("  âŒ Datei nicht gefunden:", src); continue
+            print("Datei nicht gefunden:", src); continue
         out = copy_image(src, bad_dir)
         lbls: List[str] = []
         print("Labels vergeben (mehrere nacheinander; leere Eingabe beendet):")
@@ -418,7 +418,7 @@ def register_exercise_interactive(base_dir: str = "."):
         images[f"bad/{out.name}"] = {"quality":"bad","labels":lbls}
 
     save_labels_json(pictures_dir, labels)
-    print("âœ“ labels.json aktualisiert.")
+    print("labels.json aktualisiert.")
 
     # Keypoints aus GUTEN Bildern
     ok, fail = ensure_keypoints_for_dir(good_dir)
@@ -440,16 +440,16 @@ def register_exercise_interactive(base_dir: str = "."):
 
     angles = _validate_angles(raw_angles, allowed)
     if not angles:
-        raise RuntimeError("KI lieferte keine validen Winkel innerhalb der erlaubten Joints â€“ Registrierung abgebrochen.")
+        raise RuntimeError("KI lieferte keine validen Winkel innerhalb der erlaubten Joints Registrierung abgebrochen.")
 
     raw_segments = obj.get("segments")
     segments = _validate_segments(raw_segments, allowed)
     if not segments:
-        raise RuntimeError("KI lieferte keine validen Segmente â€“ Registrierung abgebrochen.")
+        raise RuntimeError("KI lieferte keine validen Segmente“ Registrierung abgebrochen.")
 
     knowledge_md = obj.get("knowledge_md")
     if not isinstance(knowledge_md, str) or not knowledge_md.strip():
-        raise RuntimeError("KI lieferte kein 'knowledge_md' â€“ Registrierung abgebrochen.")
+        raise RuntimeError("KI lieferte kein 'knowledge_md Registrierung abgebrochen.")
 
     # spec.yaml fÃ¼r Overlays
     spec_path = pictures_dir / "spec.yaml"
@@ -479,7 +479,7 @@ def register_exercise_interactive(base_dir: str = "."):
     }
     write_yaml(cfg_path, cfg)
 
-    print("\nâœ“ Registrierung abgeschlossen")
+    print("\nRegistrierung abgeschlossen")
     print("  YAML:", cfg_path)
     print("  Knowledge:", knowledge_path)
     print("  Bilder:", pictures_dir)

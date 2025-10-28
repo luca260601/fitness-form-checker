@@ -20,7 +20,6 @@ from utils.bootstrap_fs import ensure_picture_tree, init_refdb_if_missing
 
 from utils.bootstrap_fs import ensure_picture_tree
 from utils.register_flow import register_exercise_flow
-from database.ref_gallery import init_db
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent

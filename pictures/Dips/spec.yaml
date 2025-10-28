@@ -1,0 +1,21 @@
+angles:
+- id: elbow_angle
+  points:
+  - left_shoulder
+  - left_elbow
+  - left_wrist
+- id: shoulder_angle
+  points:
+  - vertical
+  - left_shoulder
+  - left_elbow
+- id: hip_angle
+  points:
+  - left_shoulder
+  - left_hip
+  - left_knee
+- id: knee_angle
+  points:
+  - left_hip
+  - left_knee
+  - left_ankle

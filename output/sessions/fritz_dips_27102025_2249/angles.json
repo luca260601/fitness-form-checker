@@ -1,0 +1,12 @@
+{
+  "__side__": "RIGHT",
+  "__exercise_type__": "bilateral",
+  "__perspective__": "lateral",
+  "__use_3d__": false,
+  "oberarm_unterarm_deg": 85.4758104968359,
+  "rumpf_neigung_deg": 143.0452342728091,
+  "ellenbogen_korper_deg": 50.63531735720063,
+  "knie_beugung_deg": 126.50919240725949,
+  "trunk_inclination_deg": 36.81904680095773,
+  "__trunk_estimated__": false
+}

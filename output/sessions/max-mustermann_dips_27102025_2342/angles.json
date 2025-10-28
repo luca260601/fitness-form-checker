@@ -1,0 +1,12 @@
+{
+  "__side__": "RIGHT",
+  "__exercise_type__": "bilateral",
+  "__perspective__": "lateral",
+  "__use_3d__": false,
+  "elbow_angle_deg": 85.4758104968359,
+  "shoulder_angle_deg": 92.40991691560846,
+  "hip_angle_deg": 171.76958919556307,
+  "knee_angle_deg": 126.50919240725949,
+  "trunk_inclination_deg": 36.81904680095773,
+  "__trunk_estimated__": false
+}
